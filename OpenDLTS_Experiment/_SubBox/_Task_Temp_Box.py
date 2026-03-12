@@ -95,7 +95,7 @@ class Task_Temp_Box:
         elif change['new'] == 'Set T_step':
             self.T_list_params_container.children = [self.T_start, self.T_end, self.T_step]
     def get_config(self):
-        return {k: getattr(self, k).value for k in ['T_start', 'T_end', 'T_step', 'T_manual_list', 'T_idle', 'T_stability_range', 'T_stability_rate', 'T_stability_rate_calc_time', 'TC_set_temp', 'T_list_chosen']}
+        return {k: getattr(self, k).value for k in ['T_start', 'T_end', 'T_step', 'T_manual_list', 'T_idle', 'T_stability_range', 'T_stability_rate', 'T_stability_rate_calc_time', 'TC_set_temp', 'TC_set_temp_P', 'TC_set_temp_I', 'TC_set_temp_D', 'T_list_chosen']}
     def load_config(self, config):
         for k, v in config.items():
             if hasattr(self, k): getattr(self, k).value = v
