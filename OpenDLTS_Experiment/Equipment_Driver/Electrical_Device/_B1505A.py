@@ -69,6 +69,49 @@ class B1505A:
             else:
                 time.sleep(1)
 
+    def parse_b1505a_text(raw_text, header_marker="Vr,Ir,Rr", row_delimiter="\n\r\\"):
+        """
+        解析带有特定分隔符和起始标记的文本数据
+        
+        :param raw_text: 原始文本字符串
+        :param header_marker: 数据开始的表头标记
+        :param row_delimiter: 行与行之间的特殊分隔符
+        :return: headers (表头列表), data_matrix (Numpy二维数组)
+        """
+        # 按照特殊分隔符对文本进行切片
+        lines = raw_text.split(row_delimiter)
+        
+        headers = []
+        data_list = []
+        start_reading = False
+        
+        for line in lines:
+            # 去除首尾可能多余的空白字符
+            line = line.strip()
+            if not line:
+                continue
+                
+            # 探测是否到达数据表头所在行
+            if line.startswith(header_marker):
+                start_reading = True
+                headers = line.split(',')
+                continue # 跳过表头这一行，继续读取下一行的数据
+                
+            # 如果已经找到了表头，开始解析数据
+            if start_reading:
+                try:
+                    # 将该行按逗号分割，并转换为浮点数
+                    values = [float(x) for x in line.split(',')]
+                    data_list.append(values)
+                except ValueError:
+                    # 如果遇到无法转换成数字的行（比如文件结尾的其他文本），可以跳过或停止
+                    # print(f"警告：跳过无法解析的行 -> {line}")
+                    break 
+    
+        # 将列表转换为 Numpy 数组，方便后续的数学计算或切片操作
+        data_matrix = np.array(data_list)
+        return headers, data_matrix
+
     def _log(self, m, c='#778899', l='info'):
         if l == 'info':
             LOGGER.info(m, extra={'color': c})
