@@ -563,6 +563,8 @@ class MFIA:
         t = np.linspace(0, (daqpoints-1)/real_rate, daqpoints)
         i = np.array(real_i_list)
         v = np.array(real_v_list)
+        # Set Bias Voltage to 0V
+        self.daq.setDouble('/{}/imps/0/bias/value'.format(self.id), 0.00000000)
         return {
             "raw_data": {"t": t, "i": i, "v": v, "x": v, "y": i, "y2": i},
             "save_type": {
