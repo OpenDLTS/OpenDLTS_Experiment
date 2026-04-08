@@ -42,9 +42,10 @@ class MeasurementMethod:
         self.save_check = widgets.Checkbox(value=True, description='Save Data', style={'description_width': 'initial'})
         self.progress = widgets.FloatProgress(value=0, min=0, max=1, description='Progress:', bar_style='success', layout=widgets.Layout(width='100%'))
         self.replot_btn = widgets.Button(description='Replot', button_style='info', icon='pen', layout=widgets.Layout(width='40%'))
+        self.save_name = widgets.Text(value = '', placeholder = 'Default Name', description = 'Save Name: ', layout = widgets.Layout(width = '90%'))
         self.log_output = widgets.Text(value=f'{self.name} related log will show here', disabled=True, layout=widgets.Layout(width='90%'))
         self.param_container = widgets.VBox()
-        self.box = widgets.VBox([widgets.HBox([self.start_btn, self.save_check, self.progress, self.replot_btn]), self.log_output, self.param_container])
+        self.box = widgets.VBox([widgets.HBox([self.start_btn, self.save_check, self.progress, self.replot_btn]),self.save_name, self.log_output, self.param_container])
     def _setup_parameters(self):
         sig = inspect.signature(self.method.main)
         param_widgets = []

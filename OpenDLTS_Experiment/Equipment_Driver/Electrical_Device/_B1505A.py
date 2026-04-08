@@ -41,33 +41,40 @@ class B1505A:
             # 开启相应workspace
             self.b1505a.write(f':WORK:OPEN "{self._workspace_name}"')
             time.sleep(5)
-            self._wait_for_cmd_compelete()
+            if self._wait_for_cmd_compelete():
+                pass
         else:
             if self._workspace_name not in self.b1505a.query(':WORK:NAME?'):
                 self.b1505a.write(f':WORK:CLOS')
                 time.sleep(5)
-                self._wait_for_cmd_compelete()
+                if self._wait_for_cmd_compelete():
+                    pass
                 # 开启相应workspace
                 self.b1505a.write(f':WORK:OPEN "{self._workspace_name}"')
                 time.sleep(5)
-                self._wait_for_cmd_compelete()
+                if self._wait_for_cmd_compelete():
+                    pass
     
     def _goto_preset_group(self):
         self.b1505a.write(f':PRES:OPEN "{self._preset_group_name}"')
         time.sleep(5)
-        self._wait_for_cmd_compelete()
-
-    def _wait_for_cmd_compelete(self):
-        while True:
-            status = None
-            try:
-                status = self.b1505a.query('*OPC?')
-            except Exception:
-                pass
-            if status == '1':
-                break
-            else:
-                time.sleep(1)
+        if self._wait_for_cmd_compelete():
+            pass
+    
+    def _wait_for_cmd_compelete(self, timelimit=600):
+        status = None
+        original_timeout = self.b1505a.timeout
+        try:
+            self.b1505a.timeout = timelimit * 1000
+            status = self.b1505a.query('*OPC?')
+        except Exception:
+            pass
+        finally:
+            self.b1505a.timeout = original_timeout
+        if status == '1':
+            return True
+        else:
+            return False
 
     def parse_b1505a_text(self, raw_text, header_marker="Vf,If,Ta", row_delimiter="\\r\\n"):
         """
@@ -176,7 +183,7 @@ class B1505A:
         self.b1505a.write(f':STR "PulsePeriodMode", "AUTO"')
         self.b1505a.write(f':NUMB "ManualPulsePeriod", 50e-3')
         self._check_instrument_errors("Set Parameters")
-        
+        time.sleep(0.5)
 
     def measure_IV_main(
         self, Vstart: float = -3.0, Vend: float = 3.0, Vstep: float = 0.01, SMU: str = 'SMU5:MC'
@@ -186,11 +193,18 @@ class B1505A:
         """
         self._log('Start IV Measure')
 
-        # 启动单次测量[cite: 1]
-        self.b1505a.write(':BENC:SEL:RUN')
-        time.sleep(2)
-        # 等待测量完成。使用 *OPC? 阻塞直到所有待处理操作完成[cite: 1]
-        self._wait_for_cmd_compelete()
+        while True:
+            # 启动单次测量[cite: 1]
+            self.b1505a.write(':BENC:SEL:RUN')
+            time.sleep(2)
+            # 等待测量完成。使用 *OPC? 阻塞直到所有待处理操作完成[cite: 1]
+            if self._wait_for_cmd_compelete():
+                break
+            else:
+                self._log(f'OPC timeout, restart measurement', l='warning')
+                self.b1505a.write(':BENC:SEL:ABOR')
+                time.sleep(10)
+                continue
 
         # 设置数据获取格式：返回 TEXT 格式，且换行符编码设为 ON (\r\n)[cite: 1]
         self.b1505a.write(':RES:FORM TEXT')
@@ -247,9 +261,9 @@ class B1505A:
                 "x_scaling": 1.0,
                 "y_scaling": 1.0,
                 "y2_scaling": 1.0,
-                "xlabel": "Voltage [V]",
-                "ylabel": "Current [A]",
-                "y2label": "Current [A]",
+                "xlabel": "Voltage (V)",
+                "ylabel": "Current (A)",
+                "y2label": "Current (A)",
                 "ignore_points": False
             }
         }
@@ -318,6 +332,7 @@ class B1505A:
         self.b1505a.write(f':NUMB "SamplingInterval", {SamplingInterval}')
 
         self._check_instrument_errors("Set Parameters")
+        time.sleep(0.5)
         
 
     def measure_DRon_I_main(
@@ -331,11 +346,18 @@ class B1505A:
         """
         self._log('Start DRon_I Measure')
 
-        # 启动单次测量[cite: 1]
-        self.b1505a.write(':BENC:SEL:RUN')
-        time.sleep(2)
-        # 等待测量完成。使用 *OPC? 阻塞直到所有待处理操作完成[cite: 1]
-        self._wait_for_cmd_compelete()
+        while True:
+            # 启动单次测量[cite: 1]
+            self.b1505a.write(':BENC:SEL:RUN')
+            time.sleep(2)
+            # 等待测量完成。使用 *OPC? 阻塞直到所有待处理操作完成[cite: 1]
+            if self._wait_for_cmd_compelete():
+                break
+            else:
+                self._log(f'OPC timeout, restart measurement', l='warning')
+                self.b1505a.write(':BENC:SEL:ABOR')
+                time.sleep(10)
+                continue
 
         # 设置数据获取格式：返回 TEXT 格式，且换行符编码设为 ON (\r\n)[cite: 1]
         self.b1505a.write(':RES:FORM TEXT')
@@ -400,9 +422,9 @@ class B1505A:
                 "x_scaling": 1.0,
                 "y_scaling": 1e3,
                 "y2_scaling": 1.0,
-                "xlabel": "Time [s]",
-                "ylabel": "Resistance [mOhm]",
-                "y2label": "Voltage [V]",
+                "xlabel": "Time (s)",
+                "ylabel": "Resistance (mOhm)",
+                "y2label": "Voltage (V)",
                 "ignore_points": True
             }
         }
@@ -411,7 +433,7 @@ class B1505A:
         """
         测量后执行的清理步骤
         """
-        self._log('IV: Post-measurement cleanup...')
+        #self._log('DRon_I: Post-measurement cleanup...')
         # 如果需要关闭工作空间，可以取消注释下面代码
         # self.b1505a.write(':WORK:CLOS')
         # self.b1505a.query('*OPC?')[cite: 1]
