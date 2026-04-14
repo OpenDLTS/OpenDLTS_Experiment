@@ -34,7 +34,10 @@ def Task_RawFile_Save():
 def Task_Value_Stability(Method : list = ['Shapiro_Wilk'], Interval_Time: float = 5, P_Value: float = 0.15,
                          Ignore_Ratio: float = 0.05, Max_Attempt: int = 5) -> None:
     pass
-def Task_Param_Calc(Ref_Task_Num: int = 1, Target_Par: str = 'Vm1_gs', User_Fun: str = "lambda i,v: float(np.interp(500e-6,i,v))"):
+def Task_Param_Calc(
+    Ref_Task_Num1: int = 1, Target_Par1: str = 'Vm1_gs', User_Fun1: str = "lambda i,v: float(np.interp(500e-6,i,v))",
+    Ref_Task_Num2: int = 2, Target_Par2: str = '', User_Fun2: str = "",
+):
     pass
 def Task_Param_Calc_T(
         Target_Par1: str = 'Vm1_gs', User_Fun1: str = "lambda T: float(np.interp(T,[200,300],[0,1]))",
@@ -404,6 +407,65 @@ class Task_Cap_Box:
         new_method_par = method_par_pre_process(method_par=input_method_par, T=targetT, par_fun_T_dict=get_par_fun_T_dict_from_decorator_kwargs(decorator_param))
         # 根据decorator_param进行Task_Param_Calc预处理
         if decorator_param['If_Task_Param_Calc']:
+            #提取变量
+            temp_ref_task_dict = {}
+            temp_par_dict = {}
+            temp_fun_dict = {}
+            for pn in decorator_param.keys():
+                if pn.startswith('Task_Param_Calc_Ref_Task_Num'):
+                    par_index = pn.replace('Task_Param_Calc_Ref_Task_Num','')
+                    temp_ref_task_dict[par_index] = decorator_param[pn]
+                if pn.startswith('Task_Param_Calc_Target_Par'):
+                    par_index = pn.replace('Task_Param_Calc_Target_Par','')
+                    temp_par_dict[par_index] = decorator_param[pn]
+                if pn.startswith('Task_Param_Calc_User_Fun'):
+                    par_index = pn.replace('Task_Param_Calc_User_Fun','')
+                    temp_fun_dict[par_index] = decorator_param[pn]
+            for pi,_ in temp_ref_task_dict.items():
+                ref_task_index = temp_ref_task_dict[pi]-1
+                if ref_task_index < 0 or ref_task_index > len(self.task_list)-1:
+                    LOGGER.info(f'Task_Param_Calc_Ref_Task_Num{pi} Wrong, skip')
+                    continue
+                target_par = temp_par_dict[pi]
+                if type(target_par)==str:
+                    if target_par not in list(input_method_par.keys()):
+                        LOGGER.info(f'Task_Param_Calc_Target_Par{pi} Wrong, skip')
+                        continue
+                elif type(target_par)==list:
+                    for tpi in target_par:
+                        if tpi not in list(input_method_par.keys()):
+                            LOGGER.info(f'Task_Param_Calc_Target_Par{pi} Wrong, skip')
+                            continue
+                else:
+                    LOGGER.info(f'Task_Param_Calc_Target_Par{pi} Should be str or list, skip')
+                    continue
+                if temp_fun_dict[pi] == '':
+                    LOGGER.info(f"Task_Param_Calc_User_Fun{pi} Should not be '', skip")
+                    continue
+                else:
+                    udf = eval(temp_fun_dict[pi])
+                LOGGER.info(f'Task_Param_Calc: Ref Task={ref_task_index+1}; Target Par={target_par}')
+
+                try:
+                    # 获取refdata的键
+                    ref_data_name_list = [n for n,_ in inspect.signature(udf).parameters.items()]
+                    # 获取refdata
+                    if self._current_temp_task_data_list[ref_task_index] is not None:
+                        ref_data_kwargs = {k:self._current_temp_task_data_list[ref_task_index]['raw_data'][k] for k in ref_data_name_list}
+                    else:
+                        LOGGER.info(f"No TASK{ref_task_index+1}'s data at {targetT}K. Skip")
+                        continue
+                    # 执行函数并赋值
+                    if type(target_par)==str:
+                        new_method_par[target_par] = udf(**ref_data_kwargs)
+                    elif type(target_par)==list:
+                        for tpi in target_par:
+                            new_method_par[tpi] = udf(**ref_data_kwargs)
+                except Exception as e:
+                    LOGGER.info(f'_set_current_task_method_par Wrong: {str(e)}. Skip')
+                    continue
+            
+            """
             ref_task_index = decorator_param['Task_Param_Calc_Ref_Task_Num'] - 1
             if ref_task_index < 0 or ref_task_index > len(self.task_list)-1:
                 raise ValueError('Task_Param_Calc_Ref_Task_Num Wrong')
@@ -434,6 +496,7 @@ class Task_Cap_Box:
                         new_method_par[tpi] = udf(**ref_data_kwargs)
             except Exception as e:
                 raise ValueError(f'_set_current_task_method_par Wrong: {str(e)}')
+            """
         # 更新_current_task_method_par
         self._current_task_method_par = new_method_par
     # decorate method.main function
@@ -454,9 +517,12 @@ class Task_Cap_Box:
         Task_Value_Stability_Ignore_Ratio: float = 0.05,
         Task_Value_Stability_Max_Attempt: int = 5,
         If_Task_Param_Calc: bool = False,
-        Task_Param_Calc_Ref_Task_Num: int = 1,
-        Task_Param_Calc_Target_Par: str = 'Vm1_gs',
-        Task_Param_Calc_User_Fun: str = 'lambda i,v: float(np.interp(500e-6,i,v))',
+        Task_Param_Calc_Ref_Task_Num1: int = 1,
+        Task_Param_Calc_Target_Par1: str = 'Vm1_gs',
+        Task_Param_Calc_User_Fun1: str = 'lambda i,v: float(np.interp(500e-6,i,v))',
+        Task_Param_Calc_Ref_Task_Num2: int = 2,
+        Task_Param_Calc_Target_Par2: str = '',
+        Task_Param_Calc_User_Fun2: str = '',
         If_Task_Param_Calc_T: bool = False,
         Task_Param_Calc_T_Target_Par1: str = 'Vm1_gs',
         Task_Param_Calc_T_User_Fun1: str = "lambda T: float(np.interp(T,[200,300],[0,1]))",
