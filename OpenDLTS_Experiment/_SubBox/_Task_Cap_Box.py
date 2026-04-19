@@ -647,11 +647,28 @@ class Task_Cap_Box:
             changed_y = item['changed_y']
             new_filename = f"{self._current_task_file_prefix}_{filename}"
             filepath = self.parent.path_header / new_filename
-            
+
+
+            if self._write_firstline:
+                with open(filepath, 'a') as f:
+                    np.savetxt(f, DLTS_format(np.insert(fixed_x, 0, 0.0).reshape(1, -1)), fmt='%s', delimiter='\t')
+                aligned_y = changed_y
+            else:
+                with open(filepath, 'r') as f_read:
+                    first_line = f_read.readline()
+                    x0 = np.array(first_line.strip().split('\t'))[1:].astype(float)
+                if (x0 == fixed_x).all():
+                    aligned_y = changed_y
+                else:
+                    aligned_y = np.interp(x0, fixed_x, changed_y)
+            with open(filepath, 'a') as f:
+                np.savetxt(f, DLTS_format(np.insert(aligned_y, 0, T).reshape(1, -1)), fmt='%s', delimiter='\t')
+            '''
             with open(filepath, 'a') as f:
                 if self._write_firstline:
                     np.savetxt(f, DLTS_format(np.insert(fixed_x, 0, 0.0).reshape(1, -1)), fmt='%s', delimiter='\t')
                 np.savetxt(f, DLTS_format(np.insert(changed_y, 0, T).reshape(1, -1)), fmt='%s', delimiter='\t')
+            '''
         if if_raw_file_save:
             # Numpy_Dict_format
             # List[Dict[str, np.ndarray]]
