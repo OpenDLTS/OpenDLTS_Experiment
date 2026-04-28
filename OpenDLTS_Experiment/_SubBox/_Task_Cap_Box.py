@@ -657,10 +657,14 @@ class Task_Cap_Box:
                 with open(filepath, 'r') as f_read:
                     first_line = f_read.readline()
                     x0 = np.array(first_line.strip().split('\t'))[1:].astype(float)
-                if (x0 == fixed_x).all():
-                    aligned_y = changed_y
+                if x0.shape == fixed_x.shape:
+                    if (x0 == fixed_x).all():
+                        aligned_y = changed_y
+                    else:
+                        aligned_y = np.interp(x0, fixed_x, changed_y)
                 else:
                     aligned_y = np.interp(x0, fixed_x, changed_y)
+                        
             with open(filepath, 'a') as f:
                 np.savetxt(f, DLTS_format(np.insert(aligned_y, 0, T).reshape(1, -1)), fmt='%s', delimiter='\t')
             '''
