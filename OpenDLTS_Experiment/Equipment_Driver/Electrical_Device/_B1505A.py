@@ -25,7 +25,7 @@ class B1505A:
             self.b1505a.read_termination = '\n'
             self.b1505a.write_termination = '\n'
             # 测量可能耗时较长，增加超时时间 (单位: 毫秒)
-            self.b1505a.timeout = 600000
+            self.b1505a.timeout = 3600000
             
             # 清除错误队列
             self.b1505a.write('*CLS')
@@ -61,7 +61,7 @@ class B1505A:
         if self._wait_for_cmd_compelete():
             pass
     
-    def _wait_for_cmd_compelete(self, timelimit=600):
+    def _wait_for_cmd_compelete(self, timelimit=3600):
         status = None
         original_timeout = self.b1505a.timeout
         try:
