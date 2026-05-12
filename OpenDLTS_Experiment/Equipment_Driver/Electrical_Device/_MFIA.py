@@ -1168,9 +1168,11 @@ class MFIA:
             }
         }
     def measure_STC_post_set(self, **kwargs):
-        # Close Aux2 Output
-        self.daq.setDouble('/{}/auxouts/1/scale'.format(self.id), 0.0)
-        self.daq.setDouble('/{}/auxouts/1/offset'.format(self.id), 0.0)
+        # Clear Aux2
+        self.daq.setDouble('/{}/auxouts/1/scale'.format(self.id), 0)
+        self.daq.setDouble('/{}/auxouts/1/offset'.format(self.id), 0)
+        # Clear Bias
+        self.daq.setDouble('/{}/imps/0/bias/value'.format(self.id), 0)
         time.sleep(1)
         # Close Signal Add
         self.daq.setInt('/{}/sigouts/0/add'.format(self.id), 0)
@@ -1539,9 +1541,11 @@ class MFIA:
         }
 
     def measure_SMOSTI_post_set(self, **kwargs):
-        # Close Aux2 Output
-        self.daq.setDouble('/{}/auxouts/1/scale'.format(self.id), 0.0)
-        self.daq.setDouble('/{}/auxouts/1/offset'.format(self.id), 0.0)
+        # Clear Aux2
+        self.daq.setDouble('/{}/auxouts/1/scale'.format(self.id), 0)
+        self.daq.setDouble('/{}/auxouts/1/offset'.format(self.id), 0)
+        # Clear Bias
+        self.daq.setDouble('/{}/imps/0/bias/value'.format(self.id), 0)
         time.sleep(1)
         # Close Signal Add
         self.daq.setInt('/{}/sigouts/0/add'.format(self.id), 0)
@@ -1856,4 +1860,543 @@ class MFIA:
         if self.temprangemode != 1:
             self.daq.setDouble('/{}/imps/0/current/range'.format(self.id), self.temprange)
 
+
+
+    # OTC
+    def measure_OTC_pre_set(self, **kwargs):
+        DeltaV = kwargs['DeltaV']
+        freq = kwargs['freq']
+        order = kwargs['order']
+        TimeConstant = kwargs['TimeConstant']
+        DataRate = kwargs['DataRate']
+        Tm = kwargs['Tm']
+        Tm2 = kwargs['Tm2']
+        Tf = kwargs['Tf']
+        Vm = kwargs['Vm']
+        Iled = kwargs['Iled']
+        Raux2 = kwargs['Raux2']
+        ManualRange = kwargs['ManualRange']
+        IfAutoRange = kwargs['IfAutoRange']
+        # progress clear
+        self._set_progress(0,'OTC')
+        # Ensure Output1 Signal ON
+        if self.daq.getInt('/{}/imps/0/output/on'.format(self.id)) != 1:
+            self._log(f'TC: Opening Output1 Signal...')
+            self.daq.setInt('/{}/imps/0/output/on'.format(self.id), 1)
+            time.sleep(5)
+        # Ensure IA Enabled
+        if self.daq.getInt('/{}/imps/0/enable'.format(self.id)) != 1:
+            self._log(f'TC: Opening IA...')
+            self.daq.setInt('/{}/imps/0/enable'.format(self.id), 1)
+            time.sleep(3)
+        # Ensure Bias ON and set to 0V
+        if self.daq.getInt('/{}/imps/0/bias/enable'.format(self.id)) == 0:
+            self.daq.setInt('/{}/imps/0/bias/enable'.format(self.id), 1)
+            time.sleep(3)
+        if self.daq.getDouble('/{}/imps/0/bias/value'.format(self.id)) !=0:
+            self.daq.setDouble('/{}/imps/0/bias/value'.format(self.id), 0)
+            time.sleep(2)
+        # Read Current AC Amplitude
+        self.tempdV = self.daq.getDouble('/{}/imps/0/output/amplitude'.format(self.id))
+        # Read Current AC Frequency
+        self.tempfreq = self.daq.getDouble('/{}/imps/0/freq'.format(self.id))
+        # set Target AC Amplitude
+        self.daq.setDouble('/{}/imps/0/output/amplitude'.format(self.id), round(DeltaV,self._roundBs))
+        # set Target AC Frequency
+        self.daq.setDouble('/{}/imps/0/freq'.format(self.id), round(freq,self._roundBs))
+        # Manual bw
+        self.daq.setInt('/{}/imps/0/auto/bw'.format(self.id), 0)
+        # set bw
+        #self.daq.setDouble('/{}/imps/0/maxbandwidth'.format(self.id), round(maxbandwidth,self._roundBs))
+        # Filter Order
+        self.daq.setInt('/{}/imps/0/demod/order'.format(self.id), order)
+        self.daq.setInt('/{}/imps/0/demod/sinc'.format(self.id), 1)
+        # timeconstant
+        self.daq.setDouble('/{}/imps/0/demod/timeconstant'.format(self.id), round(TimeConstant,self._roundBs))
+        # DataRate
+        self.daq.setDouble('/{}/imps/0/demod/rate'.format(self.id), round(DataRate,self._roundBs))
+        # Ensure Signal Add Disabled
+        if self.daq.getInt('/{}/sigouts/0/add'.format(self.id))==1:
+            self.daq.setInt('/{}/sigouts/0/add'.format(self.id), 0)
+            time.sleep(5)
+        # Set TU2: Optical Pulse
+        self.daq.setInt('/{}/tu/thresholds/1/input'.format(self.id), 59)
+        self.daq.setInt('/{}/tu/thresholds/1/inputchannel'.format(self.id), 1)
+        self.daq.setInt('/{}/tu/logicunits/1/inputs/0/not'.format(self.id), 1)
+        self.daq.setInt('/{}/tu/logicunits/1/inputs/0/channel'.format(self.id), 1)
+        self.daq.setInt('/{}/tu/logicunits/1/ops/0/value'.format(self.id), 0)
+        # Actual Tm = (Tm+Tm2)*1.01
+        self.daq.setDouble('/{}/tu/thresholds/1/deactivationtime'.format(self.id), round((Tm+Tm2)*1.01,8))
+        # Actual Tf = Tf*1.01
+        self.daq.setDouble('/{}/tu/thresholds/1/activationtime'.format(self.id), round(Tf*1.01,8))
+        # Set Vm
+        self.daq.setDouble('/{}/imps/0/bias/value'.format(self.id), Vm)
+        # Set Aux2
+        self.daq.setInt('/{}/auxouts/1/outputselect'.format(self.id), 13)
+        self.daq.setInt('/{}/auxouts/1/demodselect'.format(self.id), 1)
+        self.daq.setDouble('/{}/auxouts/1/scale'.format(self.id), round(Raux2*Iled,8))
+        self.daq.setDouble('/{}/auxouts/1/offset'.format(self.id), 0)
+        # Read RangeMode
+        self.temprangemode = self.daq.getInt('/{}/imps/0/auto/inputrange'.format(self.id))
+        # Read Range
+        self.temprange = self.daq.getDouble('/{}/imps/0/current/range'.format(self.id))
+        # Set Range
+        if IfAutoRange:
+            if self.temprangemode != 1:
+                self.daq.setInt('/{}/imps/0/auto/inputrange'.format(self.id), 1)
+        else:
+            self.daq.setInt('/{}/imps/0/auto/inputrange'.format(self.id), 0)
+            self.daq.setDouble('/{}/imps/0/current/range'.format(self.id), ManualRange)
+        time.sleep(3)
+    def measure_OTC_main(
+        self, Vm:float=-3, Iled:float=0.01, Raux2:float=25,Tm:float=2e-2, Tm2:float=0.0, Tf:float=6e-2, freq:int=100000, DeltaV:float=0.1,
+        AverageTimes:int=100, TimeConstant:float=2.4e-6, DataRate:int=107000, order:int=8, maxbandwidth:float=100,
+        IfAutoRange:bool=True, ManualRange:float=0.000100,
+        IfLogScaleReSample:bool=False, LogScaleReSamplePoints:int=0
+    ):
+        daq_module = self.daq.dataAcquisitionModule()
+        daq_module.set('device', '{}'.format(self.id))
+        daq_module.set('endless', 0)
+        # Once
+        daq_module.set('count', 1)
+        # AverageTimes
+        daq_module.set('grid/repetitions', round(AverageTimes))
+        # Sampling points is obtained according to the Data rate.
+        # For example, if the sampling time is 10ms and the sampling rate is 107k, the number of sampling points is 107k*10ms=1070
+        #if ifFillTrans:
+        #    daq_module.set('grid/cols', round(Tf*DataRate))
+        #else:
+        #    daq_module.set('grid/cols', round(Tm*DataRate))
+        
+        # get all data in one period
+        daq_module.set('grid/cols', round((Tm*1.01+Tf*1.00)*DataRate))
+        
+        # Align sampling time mode.
+        daq_module.set('grid/mode', 4)
+        daq_module.set('grid/rows', 1)
+        
+        # Set Hardware trigger, from trigger input 1, make sure the front panel auxiliary output 2 is connected to the rear panel trigger input 1
+        #daq_module.set('type', 6)
+        #daq_module.set('triggernode', '/{}/demods/0/sample.TrigIn1'.format(self.id))
+        # Set AuxIn1 as trigger
+        daq_module.set('type', 1)
+        daq_module.set('triggernode', '/{}/demods/0/sample.AuxIn1'.format(self.id))
+        
+        # down edge
+        daq_module.set('edge', 2)
+
+        # Set trigger level
+        daq_module.set('level', (Raux2*Iled)/2)
+        
+        daq_module.set('holdoff/time', 0.0)
+        daq_module.set('delay', 0.0)
+        self.daq.sync()
+        # Subscribe to the voltage value of auxiliary input 1,
+        # demodulator R value (current value at 0 frequency),
+        # parallel resistance value (Param0),
+        # parallel capacitance value (Param1)
+        daq_module.subscribe('/{}/demods/0/sample.AuxIn1.avg'.format(self.id))
+        daq_module.subscribe('/{}/demods/0/sample.R.avg'.format(self.id))
+        daq_module.subscribe('/{}/imps/0/sample.Param0.avg'.format(self.id))
+        daq_module.subscribe('/{}/imps/0/sample.Param1.avg'.format(self.id))
+        daq_module.execute()
+        # To read the acquired data from the module, use a
+        # while loop like the one below. This will allow the
+        # data to be plotted while the measurement is ongoing.
+        # Note that any device nodes that enable the streaming
+        # of data to be acquired, must be set before the while loop.
+        result = 0
+        self._log(f'Start OTC Measure')
+        while daq_module.progress() < 1.0 and not daq_module.finished():
+            # Update Progress
+            self._set_progress(float(daq_module.progress()[0]),'OTC')
+            time.sleep(1)
+            result = daq_module.read()
+        self._set_progress(1,'OTC')
+        self._log(f'End OTC Measure')
+        daq_module.finish()
+        daq_module.unsubscribe('*')
+
+        self.tempresult = result
+        # time
+        to = result['{}'.format(self.id)]['imps']['0']['sample.param1.avg'][0]['timestamp'][0]
+        t = np.linspace(0,(to[-1]-to[0])/6e7, len(to))
+        tm_index0 = 0
+        tm_index1 = np.searchsorted(t, Tm)
+        tf_index0 = np.searchsorted(t, Tm*1.01)
+        tf_index1 = -1
+        # Parallel Capacitance
+        c = result['{}'.format(self.id)]['imps']['0']['sample.param1.avg'][0]['value'][0]
+        # Parallel Resistance
+        r = result['{}'.format(self.id)]['imps']['0']['sample.param0.avg'][0]['value'][0]
+        # Demods R，AC Current
+        i = result['{}'.format(self.id)]['demods']['0']['sample.r.avg'][0]['value'][0]
+        # AUX2, Voltage
+        v = result['{}'.format(self.id)]['demods']['0']['sample.auxin1.avg'][0]['value'][0]
+
+        t_f = t[tf_index0:tf_index1]
+        if len(t_f)<=1:
+            t_f = -1
+            self._log('tf daq failed')
+        else:
+            t_f = t_f - t_f[0]
+        c_f = c[tf_index0:tf_index1]
+        r_f = r[tf_index0:tf_index1]
+        i_f = i[tf_index0:tf_index1]
+        v_f = v[tf_index0:tf_index1]
+        
+        t_m = t[tm_index0:tm_index1]
+        t_m = t_m - t_m[0]
+        c_m = c[tm_index0:tm_index1]
+        r_m = r[tm_index0:tm_index1]
+        i_m = i[tm_index0:tm_index1]
+        v_m = v[tm_index0:tm_index1]
+
+        if IfLogScaleReSample:
+            if LogScaleReSamplePoints<=0:
+                tm_indices = ReSampleFromTimeArray(t_m,len(t_m))
+                t_m = t_m[tm_indices]
+                c_m = c_m[tm_indices]
+                r_m = r_m[tm_indices]
+                i_m = i_m[tm_indices]
+                v_m = v_m[tm_indices]
+                tf_indices = ReSampleFromTimeArray(t_f,len(t_f))
+                t_f = t_f[tf_indices]
+                c_f = c_f[tf_indices]
+                r_f = r_f[tf_indices]
+                i_f = i_f[tf_indices]
+                v_f = v_f[tf_indices]
+            else:
+                tm_indices = ReSampleFromTimeArray(t_m,LogScaleReSamplePoints)
+                t_m = t_m[tm_indices]
+                c_m = c_m[tm_indices]
+                r_m = r_m[tm_indices]
+                i_m = i_m[tm_indices]
+                v_m = v_m[tm_indices]
+                tf_indices = ReSampleFromTimeArray(t_f,LogScaleReSamplePoints)
+                t_f = t_f[tf_indices]
+                c_f = c_f[tf_indices]
+                r_f = r_f[tf_indices]
+                i_f = i_f[tf_indices]
+                v_f = v_f[tf_indices]
+
+        
+        return {
+            "raw_data": {"t": t_m, "c": c_m, "r": r_m, "i": i_m, "v": v_m, "t_f": t_f, "c_f": c_f, "r_f": r_f,
+                         "i_f": i_f, "v_f": v_f, 'x':t_m, 'y':c_m, 'y2':i_m},
+            "save_type": {
+                "Once_format": [
+                    {"filename": "OTC_data_m.txt", "data": np.column_stack((t_m, c_m, r_m, i_m, v_m))},
+                    {"filename": "OTC_data_f.txt", "data": np.column_stack((t_f, c_f, r_f, i_f, v_f))}
+                ],
+                "DLTS_format": [
+                    {"filename": "TC_m.transdata", "fixed_x": t_m, "changed_y": c_m},
+                    {"filename": "TC_f.transdata", "fixed_x": t_f, "changed_y": c_f}
+                ],
+                "Numpy_Dict_format": [
+                    {"filename": "OTC.npy", "data": {"t": t_m, "c": c_m, "r": r_m, "i": i_m, "v": v_m,
+                                                    "t_f": t_f, "c_f": c_f, "r_f": r_f,"i_f": i_f, "v_f": v_f}}
+                ]
+            },
+            "plot_type": {
+                'xscale':'linear',
+                'yscale':'linear',
+                'x_scaling':1.0,
+                'xlabel':'Time [s]',
+                'y_scaling':1e12,
+                'ylabel':'Capacitance [pF]',
+                'y2_scaling':1e6,
+                'y2label':'Current [uA]',
+                'ignore_points':True
+            }
+        }
+    def measure_OTC_post_set(self, **kwargs):
+        # Close Signal Add
+        self.daq.setInt('/{}/sigouts/0/add'.format(self.id), 0)
+        time.sleep(2)
+        # Set Previous AC Frequency
+        self.daq.setDouble('/{}/imps/0/freq'.format(self.id), round(self.tempfreq,self._roundBs))
+        # Set Previous AC Amplitude
+        self.daq.setDouble('/{}/imps/0/output/amplitude'.format(self.id), round(self.tempdV,self._roundBs))
+        # Set Range
+        self.daq.setInt('/{}/imps/0/auto/inputrange'.format(self.id), self.temprangemode)
+        if self.temprangemode != 1:
+            self.daq.setDouble('/{}/imps/0/current/range'.format(self.id), self.temprange)
+        # Clear Aux2
+        self.daq.setDouble('/{}/auxouts/1/scale'.format(self.id), 0)
+        self.daq.setDouble('/{}/auxouts/1/offset'.format(self.id), 0)
+        # Clear Bias
+        self.daq.setDouble('/{}/imps/0/bias/value'.format(self.id), 0)
+
+
+
+
+
+    # OTI
+    def measure_OTI_pre_set(self, **kwargs):
+        Vm = kwargs['Vm']
+        Tm = kwargs['Tm']
+        Iled = kwargs['Iled']
+        Raux2 = kwargs['Raux2']
+        Tf = kwargs['Tf']
+        ManualRange = kwargs['ManualRange']
+        DataRateMode = kwargs['DataRateMode']
+        IfAutoRange = kwargs['IfAutoRange']
+        # progress clear
+        self._set_progress(0,'OTI')
+        # Ensure Output1 Signal ON
+        if self.daq.getInt('/{}/imps/0/output/on'.format(self.id)) != 1:
+            self._log(f'OTI: Opening Output1 Signal...')
+            self.daq.setInt('/{}/imps/0/output/on'.format(self.id), 1)
+            time.sleep(5)
+        # Ensure IA Enabled
+        if self.daq.getInt('/{}/imps/0/enable'.format(self.id)) != 1:
+            self._log(f'OTI: Opening IA...')
+            self.daq.setInt('/{}/imps/0/enable'.format(self.id), 1)
+            time.sleep(3)
+        # Ensure Bias ON and set to 0V
+        if self.daq.getInt('/{}/imps/0/bias/enable'.format(self.id)) == 0:
+            self.daq.setInt('/{}/imps/0/bias/enable'.format(self.id), 1)
+            time.sleep(3)
+        if self.daq.getDouble('/{}/imps/0/bias/value'.format(self.id)) !=0:
+            self.daq.setDouble('/{}/imps/0/bias/value'.format(self.id), 0)
+            time.sleep(2)
+        # Read Current AC Amplitude
+        self.tempdV = self.daq.getDouble('/{}/imps/0/output/amplitude'.format(self.id))
+        # Read Current AC Frequency
+        self.tempfreq = self.daq.getDouble('/{}/imps/0/freq'.format(self.id))
+        # set 0 AC Amplitude
+        self.daq.setDouble('/{}/imps/0/output/amplitude'.format(self.id), 0)
+        # set 0 AC Frequency
+        self.daq.setDouble('/{}/imps/0/freq'.format(self.id), 0)
+        # Ensure Signal Add Disabled
+        if self.daq.getInt('/{}/sigouts/0/add'.format(self.id))==1:
+            self.daq.setInt('/{}/sigouts/0/add'.format(self.id), 0)
+            time.sleep(5)
+        # Set TU2
+        self.daq.setInt('/{}/tu/thresholds/1/input'.format(self.id), 59)
+        self.daq.setInt('/{}/tu/thresholds/1/inputchannel'.format(self.id), 1)
+        self.daq.setInt('/{}/tu/logicunits/1/inputs/0/not'.format(self.id), 1)
+        # Input 2
+        self.daq.set('/{}/tu/logicunits/1/inputs/0/channel'.format(self.id), 1)
+        # op=None
+        self.daq.set('/{}/tu/logicunits/1/ops/0/value'.format(self.id), 0)
+        # Actual Tm = Tm*1.01
+        self.daq.setDouble('/{}/tu/thresholds/1/deactivationtime'.format(self.id), round(Tm*1.01,8))
+        # Actual Tf = Tf*1.01
+        self.daq.setDouble('/{}/tu/thresholds/1/activationtime'.format(self.id), round(Tf*1.01,8))
+        # Set Aux2
+        self.daq.setInt('/{}/auxouts/1/outputselect'.format(self.id), 13)
+        self.daq.setInt('/{}/auxouts/1/demodselect'.format(self.id), 0)
+        self.daq.setDouble('/{}/auxouts/1/scale'.format(self.id), round(Iled*Raux2,8))
+        self.daq.setDouble('/{}/auxouts/1/offset'.format(self.id), 0)
+  
+        # Read RangeMode
+        self.temprangemode = self.daq.getInt('/{}/imps/0/auto/inputrange'.format(self.id))
+        # Read Range
+        self.temprange = self.daq.getDouble('/{}/imps/0/current/range'.format(self.id))
+        # Set Range
+        if IfAutoRange:
+            if self.temprangemode != 1:
+                self.daq.setInt('/{}/imps/0/auto/inputrange'.format(self.id), 1)
+        else:
+            self.daq.setInt('/{}/imps/0/auto/inputrange'.format(self.id), 0)
+            self.daq.setDouble('/{}/imps/0/current/range'.format(self.id), ManualRange)
+        # 只激活通道1
+        self.daq.setInt('/{}/scopes/0/channel'.format(self.id), 1)
+        # 通道1选择为电流1输入
+        self.daq.setInt('/{}/scopes/0/channels/0/inputselect'.format(self.id), 1)
+        # 示波器采样率模式8=234k
+        real_rate = 60e6/2**np.arange(17)[DataRateMode]
+        self.daq.setInt('/{}/scopes/0/time'.format(self.id), DataRateMode)
+        # 采样点数
+        daqpoints = int((Tm*1.01+Tf)*real_rate)
+        self.daq.setInt('/{}/scopes/0/length'.format(self.id), daqpoints)
+        # 启用示波器触发
+        self.daq.setInt('/{}/scopes/0/trigenable'.format(self.id), 1)
+        
+        # 使用辅助输入2作为触发信号
+        self.daq.setInt('/{}/scopes/0/trigchannel'.format(self.id), 9)
+        
+        # 下降沿
+        self.daq.setInt('/{}/scopes/0/trigslope'.format(self.id), 2)
+        
+        # 迟滞
+        self.daq.setDouble('/{}/scopes/0/trighysteresis/absolute'.format(self.id), 0.00000000)
+        
+        # 关闭触发门控
+        self.daq.setInt('/{}/scopes/0/triggate/enable'.format(self.id), 0)
+
+        # 触发电平
+        self.daq.setDouble('/{}/scopes/0/triglevel'.format(self.id), (Iled*Raux2)/2)
+        
+        # 释抑时间10u
+        self.daq.setDouble('/{}/scopes/0/trigholdoff'.format(self.id), 0.00000100)
+        # 参考0，即从0s开始记录信号
+        self.daq.setDouble('/{}/scopes/0/trigreference'.format(self.id), 0.00000000)
+        # 信号延迟0s
+        self.daq.setDouble('/{}/scopes/0/trigdelay'.format(self.id), 0.00000000)
+        # 开启示波器采集，可以在绘图模块中引入
+        self.daq.setInt('/{}/scopes/0/stream/enables/0'.format(self.id), 1)
+        # 示波器采集频率默认107k=9
+        self.daq.setInt('/{}/scopes/0/stream/rate'.format(self.id), 9)
+        time.sleep(3)
+    
+    def measure_OTI_main(
+        self, Vm:float=-3, Tm:float=2e-2, Vf:float=-0.5, Tf:float=6e-2,
+        AverageTimes:int=100, DataRateMode:int=8,
+        IfAutoRange:bool=True, ManualRange:float=0.000100,
+        IfLogScaleReSample:bool=False, LogScaleReSamplePoints:int=0
+    ):
+        # 好像有时候会卡在这个loop里......
+        # 设置一个time_limit来观察CurrentDataLen有没有发生变化
+        time_limit = 60
+        Task_something_wrong = False
+        while True:
+            if Task_something_wrong:
+                Task_something_wrong = False
+            scope = self.daq.scopeModule()
+            # 横轴时间
+            scope.set('mode', 1)
+            # 启用平均
+            scope.set('averager/enable', 1)
+            # 启用均一权重
+            scope.set('averager/method', 1)
+            # 示波器采样率模式8=234k, 9=117k, 10=59k, 11=29k
+            real_rate = 60e6/2**np.arange(17)[DataRateMode]
+            # 采样点数
+            #if ifFillTrans:
+            #    daqpoints = int(Tf*real_rate)
+            #else:
+            #    daqpoints = int(Tm*real_rate)
+            daqpoints = int((Tm*1.01+Tf)*real_rate)
+            
+            scope.unsubscribe('*')
+            scope.subscribe('/{}/scopes/0/wave'.format(self.id))
+            scope.execute()
+            # 开始采集
+            self._log(f'Start OTI Measure')
+            self.daq.setInt('/{}/scopes/0/enable'.format(self.id), 1)
+            TargetAverageTimes = AverageTimes
+            CurrentDataLen = 0
+            CurrentDataLen_before = 0
+            temp_time0 = time.time()
+            result = []
+            # 每隔1s进行scope.read()获取数据，直到获得指定次数的数据
+            while CurrentDataLen < TargetAverageTimes:
+                if CurrentDataLen_before != CurrentDataLen:
+                    temp_time0 = time.time()
+                    CurrentDataLen_before = CurrentDataLen
+                else:
+                    if time.time()-temp_time0>=time_limit:
+                        self._log('Something went wrong, restart current task...')
+                        Task_something_wrong = True
+                        break
+                time.sleep(1)
+                tempresult = scope.read()
+                try:
+                    tempdatalen = len(tempresult[self.id]['scopes']['0']['wave'])
+                except:
+                    tempdatalen = 0
+                CurrentDataLen += tempdatalen
+                if tempdatalen != 0:
+                    for i in range(tempdatalen):
+                        result.append(tempresult[self.id]['scopes']['0']['wave'][i][0]['wave'][0])
+                # Update Progress
+                if CurrentDataLen/TargetAverageTimes <= 1:
+                    self._set_progress(CurrentDataLen/TargetAverageTimes,'OTI')
+                else:
+                    self._set_progress(1.0,'OTI')
+            # 结束采集
+            self.daq.setInt('/{}/scopes/0/enable'.format(self.id), 0)
+            scope.finish()
+            scope.unsubscribe('*')
+            self._log(f'End OTI Measure')
+            if not Task_something_wrong:
+                break
+            else:
+                time.sleep(2)
+
+
+        result = np.array(result)
+        result = result[0:TargetAverageTimes]
+        result = np.average(result,axis=0)
+        # time
+        t = np.linspace(0, (daqpoints-1)/real_rate, daqpoints)
+        tm_index0 = 0
+        tm_index1 = np.searchsorted(t, Tm)
+        tf_index0 = np.searchsorted(t, Tm*1.01)
+        tf_index1 = -1
+        
+        # Current
+        i = result
+        raw = result
+        
+        t_m = t[tm_index0:tm_index1]
+        t_m = t_m - t_m[0]
+        i_m = i[tm_index0:tm_index1]
+        t_f = t[tf_index0:tf_index1]
+        t_f = t_f - t_f[0]
+        i_f = i[tf_index0:tf_index1]
+
+        if IfLogScaleReSample:
+            if LogScaleReSamplePoints<=0:
+                tm_indices = ReSampleFromTimeArray(t_m,len(t_m))
+                t_m = t_m[tm_indices]
+                i_m = i_m[tm_indices]
+                tf_indices = ReSampleFromTimeArray(t_f,len(t_f))
+                t_f = t_f[tf_indices]
+                i_f = i_f[tf_indices]
+            else:
+                tm_indices = ReSampleFromTimeArray(t_m,LogScaleReSamplePoints)
+                t_m = t_m[tm_indices]
+                i_m = i_m[tm_indices]
+                tf_indices = ReSampleFromTimeArray(t_f,LogScaleReSamplePoints)
+                t_f = t_f[tf_indices]
+                i_f = i_f[tf_indices]
+        return {
+            "raw_data": {"t": t_m, "i": i_m, "t_f": t_f, 'i_f':i_f, 'x':t_m, 'y':i_m, 'y2':i_f},
+            "save_type": {
+                "Once_format": [
+                    {"filename": "OTI_data_m.txt", "data": np.column_stack((t_m, i_m))},
+                    {"filename": "OTI_data_f.txt", "data": np.column_stack((t_f, i_f))}
+                ],
+                "DLTS_format": [
+                    {"filename": "TI_m.transdata", "fixed_x": t_m, "changed_y": i_m},
+                    {"filename": "TI_f.transdata", "fixed_x": t_f, "changed_y": i_f}
+                ],
+                "Numpy_Dict_format": [
+                    {"filename": "TI.npy", "data": {"t": t_m, "i": i_m, "t_f": t_f, 'i_f':i_f}}
+                ]
+            },
+            "plot_type": {
+                'xscale':'linear',
+                'yscale':'linear',
+                'x_scaling':1.0,
+                'xlabel':'Time [s]',
+                'y_scaling':1e6,
+                'ylabel':'Current [uA]',
+                'y2_scaling':1e6,
+                'y2label':'Current [uA]',
+                'ignore_points':True
+            }
+        }
+    def measure_OTI_post_set(self, **kwargs):
+        # Close Signal Add
+        self.daq.setInt('/{}/sigouts/0/add'.format(self.id), 0)
+        time.sleep(2)
+        # Set Previous AC Frequency
+        self.daq.setDouble('/{}/imps/0/freq'.format(self.id), round(self.tempfreq,self._roundBs))
+        time.sleep(2)
+        # Set Previous AC Amplitude
+        self.daq.setDouble('/{}/imps/0/output/amplitude'.format(self.id), round(self.tempdV,self._roundBs))
+        # Set Range
+        self.daq.setInt('/{}/imps/0/auto/inputrange'.format(self.id), self.temprangemode)
+        if self.temprangemode != 1:
+            self.daq.setDouble('/{}/imps/0/current/range'.format(self.id), self.temprange)
+        # Clear Aux2
+        self.daq.setDouble('/{}/auxouts/1/scale'.format(self.id), 0)
+        self.daq.setDouble('/{}/auxouts/1/offset'.format(self.id), 0)
+        # Clear Bias
+        self.daq.setDouble('/{}/imps/0/bias/value'.format(self.id), 0)
     
