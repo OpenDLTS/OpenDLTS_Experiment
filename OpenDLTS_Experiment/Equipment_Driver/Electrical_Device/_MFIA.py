@@ -1864,6 +1864,8 @@ class MFIA:
 
     # OTC
     def measure_OTC_pre_set(self, **kwargs):
+        Vled_limit0 = 0
+        Vled_limit1 = 2.5
         DeltaV = kwargs['DeltaV']
         freq = kwargs['freq']
         order = kwargs['order']
@@ -1932,6 +1934,8 @@ class MFIA:
         # Set Vm
         self.daq.setDouble('/{}/imps/0/bias/value'.format(self.id), Vm)
         # Set Aux2
+        self.daq.set('/{}/auxouts/1/limitlower'.format(self.id), Vled_limit0)
+        self.daq.set('/{}/auxouts/1/limitupper'.format(self.id), Vled_limit1)
         self.daq.setInt('/{}/auxouts/1/outputselect'.format(self.id), 13)
         self.daq.setInt('/{}/auxouts/1/demodselect'.format(self.id), 1)
         self.daq.setDouble('/{}/auxouts/1/scale'.format(self.id), round(Raux2*Iled,8))
@@ -2125,6 +2129,8 @@ class MFIA:
         # Clear Aux2
         self.daq.setDouble('/{}/auxouts/1/scale'.format(self.id), 0)
         self.daq.setDouble('/{}/auxouts/1/offset'.format(self.id), 0)
+        self.daq.set('/{}/auxouts/1/limitlower'.format(self.id), -10)
+        self.daq.set('/{}/auxouts/1/limitupper'.format(self.id), 10)
         # Clear Bias
         self.daq.setDouble('/{}/imps/0/bias/value'.format(self.id), 0)
 
@@ -2134,6 +2140,8 @@ class MFIA:
 
     # OTI
     def measure_OTI_pre_set(self, **kwargs):
+        Vled_limit0 = 0
+        Vled_limit1 = 2.5
         Vm = kwargs['Vm']
         Tm = kwargs['Tm']
         Iled = kwargs['Iled']
@@ -2185,9 +2193,13 @@ class MFIA:
         self.daq.setDouble('/{}/tu/thresholds/1/deactivationtime'.format(self.id), round(Tm*1.01,8))
         # Actual Tf = Tf*1.01
         self.daq.setDouble('/{}/tu/thresholds/1/activationtime'.format(self.id), round(Tf*1.01,8))
+        # Set Vm
+        self.daq.setDouble('/{}/imps/0/bias/value'.format(self.id), Vm)
         # Set Aux2
+        self.daq.set('/{}/auxouts/1/limitlower'.format(self.id), Vled_limit0)
+        self.daq.set('/{}/auxouts/1/limitupper'.format(self.id), Vled_limit1)
         self.daq.setInt('/{}/auxouts/1/outputselect'.format(self.id), 13)
-        self.daq.setInt('/{}/auxouts/1/demodselect'.format(self.id), 0)
+        self.daq.setInt('/{}/auxouts/1/demodselect'.format(self.id), 1)
         self.daq.setDouble('/{}/auxouts/1/scale'.format(self.id), round(Iled*Raux2,8))
         self.daq.setDouble('/{}/auxouts/1/offset'.format(self.id), 0)
   
@@ -2243,7 +2255,7 @@ class MFIA:
         time.sleep(3)
     
     def measure_OTI_main(
-        self, Vm:float=-3, Tm:float=2e-2, Vf:float=-0.5, Tf:float=6e-2,
+        self, Vm:float=-3, Tm:float=2e-2, Iled:float=0.01, Raux2:float=25, Tf:float=6e-2,
         AverageTimes:int=100, DataRateMode:int=8,
         IfAutoRange:bool=True, ManualRange:float=0.000100,
         IfLogScaleReSample:bool=False, LogScaleReSamplePoints:int=0
@@ -2397,6 +2409,8 @@ class MFIA:
         # Clear Aux2
         self.daq.setDouble('/{}/auxouts/1/scale'.format(self.id), 0)
         self.daq.setDouble('/{}/auxouts/1/offset'.format(self.id), 0)
+        self.daq.set('/{}/auxouts/1/limitlower'.format(self.id), -10)
+        self.daq.set('/{}/auxouts/1/limitupper'.format(self.id), 10)
         # Clear Bias
         self.daq.setDouble('/{}/imps/0/bias/value'.format(self.id), 0)
     
