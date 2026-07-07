@@ -586,7 +586,423 @@ class B1505A:
         # self.b1505a.query('*OPC?')[cite: 1]
 
 
+    
+    # ----------------------------------------------------------------------
+    # IdVds 测量方法
+    # ----------------------------------------------------------------------
+    
+    def measure_IdVds_pre_set(self, **kwargs) -> None:
+        """
+        测量前准备工作：确认当前workspace，打开Preset空间，并加载指定的 Test setup
+        """
+        self._set_progress(0, 'IdVds')
+        self._goto_workspace()
+        self._goto_preset_group()
+        
+        self._current_app_name = 'Id-Vds'
+        
+        # 选择预设的 Test
+        self.b1505a.write(f':PRES:SET:SEL "{self._current_app_name}"')
+        self._check_instrument_errors("Select Preset Test")
 
+        
+        Gate = kwargs['Gate']
+        VgStart = kwargs['VgStart']
+        VgStop = kwargs['VgStop']
+        VgStep = kwargs['VgStep']
+        
+        Source = kwargs['Source']
+
+        Drain = kwargs['Drain']
+        VdStart = kwargs['VdStart']
+        VdStop = kwargs['VdStop']
+        VdLinearStep = kwargs['VdLinearStep']
+        IdLimit = kwargs['IdLimit']
+        PdLimit = kwargs['PdLimit']
+
+        
+        
+        self.b1505a.write(f':STR "Gate", "{Gate}"')
+        self.b1505a.write(f':NUMB "VgStart", {VgStart}')
+        self.b1505a.write(f':NUMB "VgStop", {VgStop}')
+        self.b1505a.write(f':NUMB "VgStep", {VgStep}')
+        
+        self.b1505a.write(f':STR "Source", "{Source}"')
+        
+        self.b1505a.write(f':STR "Drain", "{Drain}"')
+        self.b1505a.write(f':NUMB "VdStart", {VdStart}')
+        self.b1505a.write(f':NUMB "VdStop", {VdStop}')
+        self.b1505a.write(f':NUMB "VdLinearStep", {VdLinearStep}')
+        self.b1505a.write(f':NUMB "IdLimit", {IdLimit}')
+        self.b1505a.write(f':NUMB "PdLimit", {PdLimit}')
+
+
+        self._check_instrument_errors("Set Parameters")
+        time.sleep(0.5)
+        
+
+    def measure_IdVds_main(
+        self, Gate: str = 'SMU1:HP', VgStart: float = 0.0, VgStop: float = 6.0, VgStep: float = 1.0, Source: str = 'GNDU:GND',
+        Drain: str = 'SMU3:HC', VdStart: float = 0.0, VdStop: float = 4.0, VdLinearStep: float = 0.1, IdLimit: float = 20, PdLimit: float = 40.0
+    ) -> ElectricalDeviceMeasuredData:
+        """
+        执行 IdVds 测量并解析数据
+        """
+        self._log('Start IdVds Measure')
+
+        while True:
+            # 启动单次测量[cite: 1]
+            self.b1505a.write(':BENC:SEL:RUN')
+            time.sleep(2)
+            # 等待测量完成。使用 *OPC? 阻塞直到所有待处理操作完成[cite: 1]
+            if self._wait_for_cmd_compelete():
+                break
+            else:
+                self._log(f'OPC timeout, restart measurement', l='warning')
+                self.b1505a.write(':BENC:SEL:ABOR')
+                time.sleep(10)
+                continue
+
+        # 设置数据获取格式：返回 TEXT 格式，且换行符编码设为 ON (\r\n)[cite: 1]
+        self.b1505a.write(':RES:FORM TEXT')
+        self.b1505a.write(':RES:FORM:ESC ON')
+        
+        # 请求最新测量结果[cite: 1]
+        self.b1505a.write(':RES:FET?')
+        
+        # 读取原始字节流以解析 IEEE 明确长度的块数据 (Definite Length Arbitrary Block Data)[cite: 3]
+        raw_data = self.b1505a.read_raw()
+        
+        header_str = raw_data[0:2].decode('ascii')
+        if header_str.startswith('#'):
+            num_digits = int(header_str[1])
+            data_length = int(raw_data[2:2+num_digits].decode('ascii'))
+            data_str = raw_data[2+num_digits : 2+num_digits+data_length].decode('ascii')
+        else:
+            # 如果格式异常，回退处理
+            data_str = raw_data.decode('ascii')
+
+        self._set_progress(1.0, 'IdVds')
+        self._log('End IdVds Measure')
+
+        # ---------------------------------------------------------
+        # 解析返回的 EasyEXPERT 数据
+        # EasyEXPERT TEXT 格式通常包含多行 MetaData (Headers) 以及纯数据列。
+        # 以下是通用的 Numpy 解析方法。你需要根据你实际输出的 CSV 结构微调。
+        # 假设返回数据中包含 Time, Vds, Ids 并且能计算 Ron。
+        # ---------------------------------------------------------
+        try:
+            # 跳过非数值头部行，直接读取矩阵 (如有表头视情况调整 skip_header 参数)
+            _, parsed_array = self.parse_b1505a_text(data_str, header_marker="Vdrain,Idrain,Vgate,Igate,Ta", row_delimiter="\\r\\n")
+            Vds = parsed_array[:, 0]
+            Ids = parsed_array[:, 1]
+            Vgs = parsed_array[:, 2]
+            Igs = parsed_array[:, 3]
+        except Exception as e:
+            self._log(f'Data parsing error: {e}. Generating dummy data for fallback.', l='warning')
+
+        return {
+            "raw_data": {"Vds": Vds, "Ids": Ids, "Vgs": Vgs, "Igs": Igs, "x": Vds, "y": Ids, "y2": Ids},
+            "save_type": {
+                "Once_format": [
+                    {"filename": "VdIds_data.txt", "data": np.column_stack((Vds, Ids, Vgs, Igs))}
+                ],
+                "DLTS_format": [],
+                "Numpy_Dict_format": [
+                    {"filename": "VdIds.npy", "data": {"Vds": Vds, "Ids": Ids, "Vgs": Vgs, "Igs": Igs}}
+                ]
+            },
+            "plot_type": {
+                "xscale": "linear",
+                "yscale": "linear",
+                "x_scaling": 1.0,
+                "y_scaling": 1.0,
+                "y2_scaling": 1.0,
+                "xlabel": "Voltage (V)",
+                "ylabel": "Current (A)",
+                "y2label": "Current (A)",
+                "ignore_points": False
+            }
+        }
+
+    def measure_IdVds_post_set(self, **kwargs) -> None:
+        """
+        测量后执行的清理步骤
+        """
+        #self._log('DRon_I: Post-measurement cleanup...')
+        # 如果需要关闭工作空间，可以取消注释下面代码
+        # self.b1505a.write(':WORK:CLOS')
+        # self.b1505a.query('*OPC?')[cite: 1]
+    
+
+
+
+
+
+    # ----------------------------------------------------------------------
+    # IdVgs 测量方法
+    # ----------------------------------------------------------------------
+    
+    def measure_IdVgs_pre_set(self, **kwargs) -> None:
+        """
+        测量前准备工作：确认当前workspace，打开Preset空间，并加载指定的 Test setup
+        """
+        self._set_progress(0, 'IdVgs')
+        self._goto_workspace()
+        self._goto_preset_group()
+        
+        self._current_app_name = 'Id-Vgs'
+        
+        # 选择预设的 Test
+        self.b1505a.write(f':PRES:SET:SEL "{self._current_app_name}"')
+        self._check_instrument_errors("Select Preset Test")
+
+        
+        Gate = kwargs['Gate']
+        VgStart = kwargs['VgStart']
+        VgStop = kwargs['VgStop']
+        VgStep = kwargs['VgStep']
+        
+        Source = kwargs['Source']
+
+        Drain = kwargs['Drain']
+        VdStart = kwargs['VdStart']
+        VdStop = kwargs['VdStop']
+        VdPoint = kwargs['VdPoint']
+        IdLimit = kwargs['IdLimit']
+
+        
+        
+        self.b1505a.write(f':STR "Gate", "{Gate}"')
+        self.b1505a.write(f':NUMB "VgStart", {VgStart}')
+        self.b1505a.write(f':NUMB "VgStop", {VgStop}')
+        self.b1505a.write(f':NUMB "VgStep", {VgStep}')
+        
+        self.b1505a.write(f':STR "Source", "{Source}"')
+        
+        self.b1505a.write(f':STR "Drain", "{Drain}"')
+        self.b1505a.write(f':NUMB "VdStart", {VdStart}')
+        self.b1505a.write(f':NUMB "VdStop", {VdStop}')
+        self.b1505a.write(f':NUMB "VdPoint", {VdPoint}')
+        self.b1505a.write(f':NUMB "IdLimit", {IdLimit}')
+
+
+        self._check_instrument_errors("Set Parameters")
+        time.sleep(0.5)
+        
+
+    def measure_IdVgs_main(
+        self, Gate: str = 'SMU1:HP', VgStart: float = 0.0, VgStop: float = 6.0, VgStep: float = 0.1, Source: str = 'GNDU:GND',
+        Drain: str = 'SMU3:HC', VdStart: float = 0.1, VdStop: float = 1.0, VdPoint: int = 2, IdLimit: float = 5
+    ) -> ElectricalDeviceMeasuredData:
+        """
+        执行 IdVgs 测量并解析数据
+        """
+        self._log('Start IdVgs Measure')
+
+        while True:
+            # 启动单次测量[cite: 1]
+            self.b1505a.write(':BENC:SEL:RUN')
+            time.sleep(2)
+            # 等待测量完成。使用 *OPC? 阻塞直到所有待处理操作完成[cite: 1]
+            if self._wait_for_cmd_compelete():
+                break
+            else:
+                self._log(f'OPC timeout, restart measurement', l='warning')
+                self.b1505a.write(':BENC:SEL:ABOR')
+                time.sleep(10)
+                continue
+
+        # 设置数据获取格式：返回 TEXT 格式，且换行符编码设为 ON (\r\n)[cite: 1]
+        self.b1505a.write(':RES:FORM TEXT')
+        self.b1505a.write(':RES:FORM:ESC ON')
+        
+        # 请求最新测量结果[cite: 1]
+        self.b1505a.write(':RES:FET?')
+        
+        # 读取原始字节流以解析 IEEE 明确长度的块数据 (Definite Length Arbitrary Block Data)[cite: 3]
+        raw_data = self.b1505a.read_raw()
+        
+        header_str = raw_data[0:2].decode('ascii')
+        if header_str.startswith('#'):
+            num_digits = int(header_str[1])
+            data_length = int(raw_data[2:2+num_digits].decode('ascii'))
+            data_str = raw_data[2+num_digits : 2+num_digits+data_length].decode('ascii')
+        else:
+            # 如果格式异常，回退处理
+            data_str = raw_data.decode('ascii')
+
+        self._set_progress(1.0, 'IdVgs')
+        self._log('End IdVgs Measure')
+
+        # ---------------------------------------------------------
+        # 解析返回的 EasyEXPERT 数据
+        # EasyEXPERT TEXT 格式通常包含多行 MetaData (Headers) 以及纯数据列。
+        # 以下是通用的 Numpy 解析方法。你需要根据你实际输出的 CSV 结构微调。
+        # 假设返回数据中包含 Time, Vds, Ids 并且能计算 Ron。
+        # ---------------------------------------------------------
+        try:
+            # 跳过非数值头部行，直接读取矩阵 (如有表头视情况调整 skip_header 参数)
+            _, parsed_array = self.parse_b1505a_text(data_str, header_marker="Vgate,gfs,Idrain,Vdrain,Igate,Ta,gfsMax,Vth", row_delimiter="\\r\\n")
+            Ids = parsed_array[:, 2]
+            Vgs = parsed_array[:, 0]
+        except Exception as e:
+            self._log(f'Data parsing error: {e}. Generating dummy data for fallback.', l='warning')
+
+        return {
+            "raw_data": {"Vgs": Vgs, "Ids": Ids, "x": Vgs, "y": Ids, "y2": Ids},
+            "save_type": {
+                "Once_format": [
+                    {"filename": "IdVgs_data.txt", "data": np.column_stack((Vgs, Ids))}
+                ],
+                "DLTS_format": [],
+                "Numpy_Dict_format": [
+                    {"filename": "IdVgs.npy", "data": {"Vgs": Vgs, "Ids": Ids}}
+                ]
+            },
+            "plot_type": {
+                "xscale": "linear",
+                "yscale": "linear",
+                "x_scaling": 1.0,
+                "y_scaling": 1.0,
+                "y2_scaling": 1.0,
+                "xlabel": "Voltage (V)",
+                "ylabel": "Current (A)",
+                "y2label": "Current (A)",
+                "ignore_points": False
+            }
+        }
+
+    def measure_IdVgs_post_set(self, **kwargs) -> None:
+        """
+        测量后执行的清理步骤
+        """
+        #self._log('DRon_I: Post-measurement cleanup...')
+        # 如果需要关闭工作空间，可以取消注释下面代码
+        # self.b1505a.write(':WORK:CLOS')
+        # self.b1505a.query('*OPC?')[cite: 1]
+
+
+
+
+
+    # ----------------------------------------------------------------------
+    # IgVg 测量方法
+    # ----------------------------------------------------------------------
+    
+    def measure_IgVg_pre_set(self, **kwargs) -> None:
+        """
+        测量前准备工作：确认当前workspace，打开Preset空间，并加载指定的 Test setup
+        """
+        self._set_progress(0, 'IgVg')
+        self._goto_workspace()
+        self._goto_preset_group()
+        
+        self._current_app_name = 'IgVg'
+        
+        # 选择预设的 Test
+        self.b1505a.write(f':PRES:SET:SEL "{self._current_app_name}"')
+        self._check_instrument_errors("Select Preset Test")
+
+
+        self._check_instrument_errors("Set Parameters")
+        time.sleep(0.5)
+        
+
+    def measure_IgVg_main(
+        self
+    ) -> ElectricalDeviceMeasuredData:
+        """
+        执行 IgVg 测量并解析数据
+        """
+        self._log('Start IgVg Measure')
+
+        while True:
+            # 启动单次测量[cite: 1]
+            self.b1505a.write(':BENC:SEL:RUN')
+            time.sleep(2)
+            # 等待测量完成。使用 *OPC? 阻塞直到所有待处理操作完成[cite: 1]
+            if self._wait_for_cmd_compelete():
+                break
+            else:
+                self._log(f'OPC timeout, restart measurement', l='warning')
+                self.b1505a.write(':BENC:SEL:ABOR')
+                time.sleep(10)
+                continue
+
+        # 设置数据获取格式：返回 TEXT 格式，且换行符编码设为 ON (\r\n)[cite: 1]
+        self.b1505a.write(':RES:FORM TEXT')
+        self.b1505a.write(':RES:FORM:ESC ON')
+        
+        # 请求最新测量结果[cite: 1]
+        self.b1505a.write(':RES:FET?')
+        
+        # 读取原始字节流以解析 IEEE 明确长度的块数据 (Definite Length Arbitrary Block Data)[cite: 3]
+        raw_data = self.b1505a.read_raw()
+        
+        header_str = raw_data[0:2].decode('ascii')
+        if header_str.startswith('#'):
+            num_digits = int(header_str[1])
+            data_length = int(raw_data[2:2+num_digits].decode('ascii'))
+            data_str = raw_data[2+num_digits : 2+num_digits+data_length].decode('ascii')
+        else:
+            # 如果格式异常，回退处理
+            data_str = raw_data.decode('ascii')
+
+        self._set_progress(1.0, 'IgVg')
+        self._log('End IgVg Measure')
+
+        # ---------------------------------------------------------
+        # 解析返回的 EasyEXPERT 数据
+        # EasyEXPERT TEXT 格式通常包含多行 MetaData (Headers) 以及纯数据列。
+        # 以下是通用的 Numpy 解析方法。你需要根据你实际输出的 CSV 结构微调。
+        # 假设返回数据中包含 Time, Vds, Ids 并且能计算 Ron。
+        # ---------------------------------------------------------
+        try:
+            # 跳过非数值头部行，直接读取矩阵 (如有表头视情况调整 skip_header 参数)
+            _, parsed_array = self.parse_b1505a_text(data_str, header_marker="Vgs,Igs", row_delimiter="\\r\\n")
+            Igs = parsed_array[:, 1]
+            Vgs = parsed_array[:, 0]
+        except Exception as e:
+            self._log(f'Data parsing error: {e}. Generating dummy data for fallback.', l='warning')
+
+        return {
+            "raw_data": {"Vgs": Vgs, "Igs": Igs, "x": Vgs, "y": Igs, "y2": Igs},
+            "save_type": {
+                "Once_format": [
+                    {"filename": "IgVg_data.txt", "data": np.column_stack((Vgs, Igs))}
+                ],
+                "DLTS_format": [],
+                "Numpy_Dict_format": [
+                    {"filename": "IgVg.npy", "data": {"Vgs": Vgs, "Igs": Igs}}
+                ]
+            },
+            "plot_type": {
+                "xscale": "linear",
+                "yscale": "linear",
+                "x_scaling": 1.0,
+                "y_scaling": 1.0,
+                "y2_scaling": 1.0,
+                "xlabel": "Voltage (V)",
+                "ylabel": "Current (A)",
+                "y2label": "Current (A)",
+                "ignore_points": False
+            }
+        }
+
+    def measure_IgVg_post_set(self, **kwargs) -> None:
+        """
+        测量后执行的清理步骤
+        """
+        #self._log('DRon_I: Post-measurement cleanup...')
+        # 如果需要关闭工作空间，可以取消注释下面代码
+        # self.b1505a.write(':WORK:CLOS')
+        # self.b1505a.query('*OPC?')[cite: 1]
+
+
+        
+
+        
     '''
     # ----------------------------------------------------------------------
     # IdVd 测量方法
