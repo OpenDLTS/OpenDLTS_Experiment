@@ -65,6 +65,12 @@ class TLog_Box:
             self._tlog_data_t = np.append(self._tlog_data_t, t)
             self._tlog_data_T = np.append(self._tlog_data_T, T)
             self._generate_plot()
+            # Temperature Controller daemon
+            if not self.parent.task_cap_box._stop_measure_event.is_set():
+                if not self.parent.temp_controller.ifHeaterOn():
+                    temp_kwargs = self.parent.task_cap_box._current_temp_controller_kwargs
+                    if temp_kwargs is not None:
+                        self.parent.temp_controller.setTemp(**temp_kwargs)
             time.sleep(self.update_rate.value)
     def TLog_on(self):
         if not self.tlog_running:

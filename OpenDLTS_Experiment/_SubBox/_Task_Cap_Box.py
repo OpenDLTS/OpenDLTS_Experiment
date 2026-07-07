@@ -94,6 +94,7 @@ class Task_Cap_Box:
         self._current_task_method_name = ''
         self._current_task_method_par = {}
         self._current_task_method:method_wrapper = method_wrapper(method_donothing,method_donothing,method_donothing)
+        self._current_temp_controller_kwargs = {}
         self._inner_current_task_text = None
     def _set_event(self):
         #self.task_from_text_btn.on_click(self._click_task_from_text_btn)
@@ -300,6 +301,8 @@ class Task_Cap_Box:
             with self.parent.temp_controller_lock:
                 P, I, D = self.parent.pid_box.pid_curve(self.parent.temp_controller.getTemp(),temp_target)
                 self.parent.temp_controller.setTemp(temp_target, P, I, D)
+                # Update current temp_controller kwargs
+                self._current_temp_controller_kwargs = {'TargetT':temp_target,'P':P,'I':I,'D':D}
             # Sub Thread of Pre Set and Post Set
             sub_thread = threading.Thread(
                 target=self._post_and_pre_set_thread_fun,
