@@ -69,7 +69,7 @@ class TLog_Box:
             if not self.parent.task_cap_box._stop_measure_event.is_set():
                 if not self.parent.temp_controller.ifHeaterOn():
                     temp_kwargs = self.parent.task_cap_box._current_temp_controller_kwargs
-                    if temp_kwargs is not None:
+                    if temp_kwargs != {}:
                         self.parent.temp_controller.setTemp(**temp_kwargs)
             time.sleep(self.update_rate.value)
     def TLog_on(self):
