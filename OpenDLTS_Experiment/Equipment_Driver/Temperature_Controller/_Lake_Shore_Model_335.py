@@ -96,7 +96,7 @@ class Lake_Shore_Model_335:
             self._my_model_335.set_heater_range(self._heateroutput,self._my_model_335.HeaterRange.HIGH)
         self._log(f'Manually Set Heater Power={TargetPower}%')
     def ifHeaterOn(self):
-        if self._my_model_335.get_heater_range(self._heateroutput)._name_ != 'HIGH':
+        if self._my_model_335.get_heater_range(self._heateroutput)._name_ == 'HIGH':
             return True
         return False
     def setHeaterOFF(self):
