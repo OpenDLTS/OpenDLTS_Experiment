@@ -16,8 +16,12 @@ class B1505A:
         # Connect to EasyEXPERT via pyvisa
         self.rm = pyvisa.ResourceManager()
         self.instrument_address = 'TCPIP0::127.0.0.1::5025::SOCKET'
+        self.GPIB_ADDRESS = 'GPIB0::18::INSTR'
         self._workspace_name = 'OpenDLTS'
         self._preset_group_name = 'OpenDLTS'
+        # TC Method Needed
+        self.CH_CMU = 4
+        self.CH_HVSMU = 9
         
         try:
             self.b1505a = self.rm.open_resource(self.instrument_address)
@@ -133,6 +137,148 @@ class B1505A:
         except:
             return False
 
+
+    
+    # ----------------------------------------------------------------------
+    # TC 测量方法
+    # ----------------------------------------------------------------------
+
+    def measure_TC_pre_set(self, **kwargs) -> None:
+        self._set_progress(0, 'TC')
+
+
+    def measure_TC_main(
+        self, Vm: float = 30.0, Vf: float = 0.0, Tf: float = 1.0, Interval: float = 0.05, Points: int = 100, comp_current: float = 0.001,
+        DeltaV: float = 0.1, Freq: int = 100e3
+    ) -> ElectricalDeviceMeasuredData:
+        """
+        执行 TC 测量并解析数据
+        """
+        self._log('Start TC Measure')
+        if (comp_current<1e-6) or (comp_current>8e-3):
+            self._log(f"comp_current range: from 1e-6 to 8e-3; Use 8e-3 at this measurement")
+            comp_current = 8e-3
+
+        # ================= GPIB暂时连接与测量 =================
+        import pyvisa
+        import re
+        rm = pyvisa.ResourceManager()
+        try:
+            b1505 = rm.open_resource(self.GPIB_ADDRESS)
+            b1505.timeout = 3600000
+
+            b1505.write("FMT 1,1")  
+            b1505.write("TSC 1")    
+            b1505.write(f"CN {self.CH_CMU},{self.CH_HVSMU}") 
+            
+            # 测量模式设置
+            b1505.write("ACT 0, 2") 
+            b1505.write("IMP 100")  
+            b1505.write(f"RC {self.CH_CMU}, 0") 
+        
+            # 信号设置
+            b1505.write(f"FC {self.CH_CMU}, {Freq}")
+            b1505.write(f"ACV {self.CH_CMU}, {DeltaV}")
+            b1505.write(f"MDCV {self.CH_CMU}, 0, 0, 0") 
+        
+            # 初始电压
+            b1505.write(f"DV {self.CH_HVSMU}, 0, {Vf}, {comp_current}")
+            time.sleep(Tf)
+            b1505.write(f"DV {self.CH_HVSMU}, 0, {Vm}, {comp_current}")
+        
+            # 采样参数与触发
+            b1505.write(f"MTDCV 0, {Interval}, {Points}, 0")
+            b1505.write(f"MM 26, {self.CH_CMU}")
+            b1505.write("TSR") 
+            
+            b1505.write("XE")  
+            
+            b1505.query("*OPC?") 
+            
+            raw_data = b1505.read()
+        
+        except Exception as e:
+            self._log(f"测量过程中发生错误: {e}")
+            raw_data = ""
+        
+        finally:
+            self._set_progress(1.0, 'TC')
+            self._log('End TC Measure')
+            try:
+                b1505.write("DZ") # 归零所有通道
+            except:
+                pass
+            b1505.close()
+        
+        # ================= 数据处理 =================
+        if raw_data:
+            c = []
+            t = []
+            # 使用正则提取，例如匹配 "NDC+1.23456E-12"
+            # ([A-Z]{3}) 匹配3个字母前缀
+            # ([+-]\d+\.\d+E[+-]\d+) 匹配科学计数法数值
+            pattern = r'([A-Z]{3})([+-]\d+\.\d+E[+-]\d+)'
+            matches = re.findall(pattern, raw_data)
+            
+            for prefix, val_str in matches:
+                val = float(val_str)
+                data_type = prefix[2] # 提取第3个字母 (C=电容, T=时间, G=电导)
+                if data_type == 'C':
+                    c.append(val)
+                elif data_type == 'T':
+                    t.append(val)
+        
+            # 转换为 NumPy 数组
+            t = np.array(t)
+            c = np.array(c)
+        
+            # 由于返回数据中可能包含其他冗余块，确保时间和电容数组对齐
+            min_len = min(len(t), len(c))
+            t = t[:min_len]
+            c = c[:min_len]
+        
+            if min_len > 0:
+                return {
+                    "raw_data": {"t": t, "c": c, "x": t, "y": c, "y2": c},
+                    "save_type": {
+                        "Once_format": [
+                            {"filename": "TC_data.txt", "data": np.column_stack((t, c))}
+                        ],
+                        "DLTS_format": [
+                            {"filename": "TC.transdata", "fixed_x": t, "changed_y": c}
+                        ],
+                        "Numpy_Dict_format": [
+                            {"filename": "TC.npy", "data": {"t": t, "c": c}}
+                        ]
+                    },
+                    "plot_type": {
+                        "xscale": "linear",
+                        "yscale": "linear",
+                        "x_scaling": 1.0,
+                        "y_scaling": 1e12,
+                        "y2_scaling": 1e12,
+                        "xlabel": "Time (s)",
+                        "ylabel": "Capacitance (pF)",
+                        "y2label": "Capacitance (pF)",
+                        "ignore_points": True
+                    }
+                }
+        else:
+            self._log("No valid data")
+
+
+
+    def measure_TC_post_set(self, **kwargs) -> None:
+        """
+        测量后执行的清理步骤
+        """
+        self._log('TC: Post-measurement cleanup...')
+
+        
+
+
+
+    
     # ----------------------------------------------------------------------
     # IV 测量方法
     # ----------------------------------------------------------------------
