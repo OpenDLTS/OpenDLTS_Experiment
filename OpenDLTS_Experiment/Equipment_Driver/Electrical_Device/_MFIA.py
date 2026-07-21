@@ -364,11 +364,11 @@ class MFIA:
                 'xscale':'log',
                 'yscale':'linear',
                 'x_scaling':1.0,
-                'xlabel':'Frequency [Hz]',
+                'x_label':'Frequency [Hz]',
                 'y_scaling':1e12,
-                'ylabel':'Capacitance [pF]',
+                'y_label':'Capacitance [pF]',
                 'y2_scaling':1e6,
-                'y2label':'Current [uA]',
+                'y2_label':'Current [uA]',
                 'ignore_points':False
             }
         }
@@ -582,11 +582,11 @@ class MFIA:
                 'xscale':'linear',
                 'yscale':'linear',
                 'x_scaling':1.0,
-                'xlabel':'Voltage [V]',
+                'x_label':'Voltage [V]',
                 'y_scaling':1e6,
-                'ylabel':'Current [uA]',
+                'y_label':'Current [uA]',
                 'y2_scaling':1e6,
-                'y2label':'Current [uA]',
+                'y2_label':'Current [uA]',
                 'ignore_points':False
             }
         }
@@ -860,11 +860,11 @@ class MFIA:
                 'xscale':'linear',
                 'yscale':'linear',
                 'x_scaling':1.0,
-                'xlabel':'Time [s]',
+                'x_label':'Time [s]',
                 'y_scaling':1e12,
-                'ylabel':'Capacitance [pF]',
+                'y_label':'Capacitance [pF]',
                 'y2_scaling':1e6,
-                'y2label':'Current [uA]',
+                'y2_label':'Current [uA]',
                 'ignore_points':True
             }
         }
@@ -1159,11 +1159,11 @@ class MFIA:
                 'xscale':'linear',
                 'yscale':'linear',
                 'x_scaling':1.0,
-                'xlabel':'Time [s]',
+                'x_label':'Time [s]',
                 'y_scaling':1e12,
-                'ylabel':'Capacitance [pF]',
+                'y_label':'Capacitance [pF]',
                 'y2_scaling':1e6,
-                'y2label':'Current [uA]',
+                'y2_label':'Current [uA]',
                 'ignore_points':True
             }
         }
@@ -1531,11 +1531,11 @@ class MFIA:
                 'xscale':'linear',
                 'yscale':'linear',
                 'x_scaling':1.0,
-                'xlabel':'Time [s]',
+                'x_label':'Time [s]',
                 'y_scaling':1e6,
-                'ylabel':'Current [uA]',
+                'y_label':'Current [uA]',
                 'y2_scaling':1e6,
-                'y2label':'Current [uA]',
+                'y2_label':'Current [uA]',
                 'ignore_points':True
             }
         }
@@ -1838,11 +1838,11 @@ class MFIA:
                 'xscale':'linear',
                 'yscale':'linear',
                 'x_scaling':1.0,
-                'xlabel':'Time [s]',
+                'x_label':'Time [s]',
                 'y_scaling':1e6,
-                'ylabel':'Current [uA]',
+                'y_label':'Current [uA]',
                 'y2_scaling':1e6,
-                'y2label':'Current [uA]',
+                'y2_label':'Current [uA]',
                 'ignore_points':True
             }
         }
@@ -2106,11 +2106,11 @@ class MFIA:
                 'xscale':'linear',
                 'yscale':'linear',
                 'x_scaling':1.0,
-                'xlabel':'Time [s]',
+                'x_label':'Time [s]',
                 'y_scaling':1e12,
-                'ylabel':'Capacitance [pF]',
+                'y_label':'Capacitance [pF]',
                 'y2_scaling':1e6,
-                'y2label':'Current [uA]',
+                'y2_label':'Current [uA]',
                 'ignore_points':True
             }
         }
@@ -2385,11 +2385,11 @@ class MFIA:
                 'xscale':'linear',
                 'yscale':'linear',
                 'x_scaling':1.0,
-                'xlabel':'Time [s]',
+                'x_label':'Time [s]',
                 'y_scaling':1e6,
-                'ylabel':'Current [uA]',
+                'y_label':'Current [uA]',
                 'y2_scaling':1e6,
-                'y2label':'Current [uA]',
+                'y2_label':'Current [uA]',
                 'ignore_points':True
             }
         }

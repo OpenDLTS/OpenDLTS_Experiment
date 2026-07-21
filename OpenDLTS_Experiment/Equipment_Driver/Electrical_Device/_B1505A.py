@@ -21,7 +21,13 @@ class B1505A:
         self._preset_group_name = 'OpenDLTS'
         # TC Method Needed
         self.CH_CMU = 4
+        self.CH_HCSMU = 5
         self.CH_HVSMU = 9
+        self.CH_MCSMU4 = 7
+        self.CH_MCSMU5 = 8
+
+
+
         
         try:
             self.b1505a = self.rm.open_resource(self.instrument_address)
@@ -140,21 +146,21 @@ class B1505A:
 
     
     # ----------------------------------------------------------------------
-    # TC 测量方法
+    # HVTC 测量方法
     # ----------------------------------------------------------------------
 
-    def measure_TC_pre_set(self, **kwargs) -> None:
-        self._set_progress(0, 'TC')
+    def measure_HVTC_pre_set(self, **kwargs) -> None:
+        self._set_progress(0, 'HVTC')
 
 
-    def measure_TC_main(
+    def measure_HVTC_main(
         self, Vm: float = 30.0, Vf: float = 0.0, Tf: float = 1.0, Interval: float = 0.05, Points: int = 100, comp_current: float = 0.001,
         DeltaV: float = 0.1, Freq: int = 100e3
     ) -> ElectricalDeviceMeasuredData:
         """
-        执行 TC 测量并解析数据
+        执行 HVTC 测量并解析数据
         """
-        self._log('Start TC Measure')
+        self._log('Start HVTC Measure')
         if (comp_current<1e-6) or (comp_current>8e-3):
             self._log(f"comp_current range: from 1e-6 to 8e-3; Use 8e-3 at this measurement")
             comp_current = 8e-3
@@ -172,7 +178,7 @@ class B1505A:
             b1505.write(f"CN {self.CH_CMU},{self.CH_HVSMU}") 
             
             # 测量模式设置
-            b1505.write("ACT 0, 2") 
+            b1505.write("ACT 0, 1") 
             b1505.write("IMP 100")  
             b1505.write(f"RC {self.CH_CMU}, 0") 
         
@@ -202,8 +208,8 @@ class B1505A:
             raw_data = ""
         
         finally:
-            self._set_progress(1.0, 'TC')
-            self._log('End TC Measure')
+            self._set_progress(1.0, 'HVTC')
+            self._log('End HVTC Measure')
             try:
                 b1505.write("DZ") # 归零所有通道
             except:
@@ -242,13 +248,13 @@ class B1505A:
                     "raw_data": {"t": t, "c": c, "x": t, "y": c, "y2": c},
                     "save_type": {
                         "Once_format": [
-                            {"filename": "TC_data.txt", "data": np.column_stack((t, c))}
+                            {"filename": "HVTC_data.txt", "data": np.column_stack((t, c))}
                         ],
                         "DLTS_format": [
-                            {"filename": "TC.transdata", "fixed_x": t, "changed_y": c}
+                            {"filename": "HVTC.transdata", "fixed_x": t, "changed_y": c}
                         ],
                         "Numpy_Dict_format": [
-                            {"filename": "TC.npy", "data": {"t": t, "c": c}}
+                            {"filename": "HVTC.npy", "data": {"t": t, "c": c}}
                         ]
                     },
                     "plot_type": {
@@ -257,9 +263,9 @@ class B1505A:
                         "x_scaling": 1.0,
                         "y_scaling": 1e12,
                         "y2_scaling": 1e12,
-                        "xlabel": "Time (s)",
-                        "ylabel": "Capacitance (pF)",
-                        "y2label": "Capacitance (pF)",
+                        "x_label": "Time (s)",
+                        "y_label": "Capacitance (pF)",
+                        "y2_label": "Capacitance (pF)",
                         "ignore_points": True
                     }
                 }
@@ -268,13 +274,828 @@ class B1505A:
 
 
 
-    def measure_TC_post_set(self, **kwargs) -> None:
+    def measure_HVTC_post_set(self, **kwargs) -> None:
         """
         测量后执行的清理步骤
         """
-        self._log('TC: Post-measurement cleanup...')
+        self._log('HVTC: Post-measurement cleanup...')
 
         
+# ----------------------------------------------------------------------
+# HVTI 瞬态电流测量方法 (MM10 Sampling, SMU6:HV / Ch9)
+# ----------------------------------------------------------------------
+
+    def measure_HVTI_pre_set(self, **kwargs) -> None:
+        self._set_progress(0, 'HVTI')
+
+
+    def measure_HVTI_main(
+        self,
+        Vf: float = -100.0,
+        Tf: float = 10.0,
+        Vm: float = -10.0,
+        Interval: float = 0.1,
+        Points: int = 101,
+        comp_current: float = 0.008,
+        MLMode: int = 1,
+    ) -> ElectricalDeviceMeasuredData:
+        """
+        Transient I-t measurement using MM10 sampling.
+        HVSMU applies fill voltage Vf for Tf seconds,
+        then switches to Vm and samples current.
+
+        MLMode: 1=linear (default), 2-7=logarithmic (10–500 pts/decade).
+                Log mode forces interval >= 0.002 s per B1500 spec.
+        """
+        is_linear = MLMode == 1
+        actual_interval = Interval if is_linear or Interval >= 0.002 else 0.002
+        mode_label = 'Linear' if is_linear else f'Log(ML{MLMode})'
+
+        self._log(f'Start HVTI [{mode_label}]  Vf={Vf}V Tf={Tf}s Vm={Vm}V '
+                  f'Interval={actual_interval}s N={Points}')
+
+        if comp_current < 1e-6 or comp_current > 8e-3:
+            self._log(f"comp_current out of range [{1e-6}, {8e-3}]; using 8e-3")
+            comp_current = 8e-3
+
+        import pyvisa
+        import re
+
+        rm = pyvisa.ResourceManager()
+        try:
+            b1505 = rm.open_resource(self.GPIB_ADDRESS)
+            b1505.timeout = 3600000
+
+            ch = self.CH_HVSMU
+
+            b1505.write(f"CN {ch}")
+            b1505.write(f"SSRX {ch},0")
+            b1505.write(f"FL 1,{ch}")
+
+            b1505.write("MCC")
+            b1505.write(f"ML {MLMode}")
+            b1505.write(f"MT 0,{actual_interval},{Points},{Tf}")
+            b1505.write("MSC 1,2")
+
+            b1505.write("WAT 1,1,0")
+            b1505.write("WAT 2,1,0")
+
+            b1505.write("AIT 0,0,1")
+            b1505.write("AZ 0")
+            b1505.write("AIT 1,0,6")
+
+            b1505.write(f"AAD {ch},0")
+            b1505.write(f"CMM {ch},4")
+            b1505.write(f"RI {ch},12")
+            b1505.write(f"RM {ch},1")
+
+            b1505.write("PAD 1")
+            b1505.write(f"MM 10,{ch}")
+            b1505.write("FMT 1,0")
+            b1505.write("TSC 1")
+
+            b1505.write(f"MV {ch},0,{Vf},{Vm},{comp_current}")
+
+            b1505.write("TSR")
+            b1505.write("XE")
+            b1505.query("*OPC?")
+
+            raw_data = b1505.read()
+
+        except Exception as e:
+            self._log(f"HVTI measurement error: {e}")
+            raw_data = ""
+
+        finally:
+            self._set_progress(1.0, 'HVTI')
+            self._log('End HVTI')
+            try:
+                b1505.write(f"IN {self.CH_HVSMU}")
+                b1505.write("DZ")
+            except Exception:
+                pass
+            b1505.close()
+
+        if not raw_data:
+            self._log("HVTI: no data received")
+            return
+
+        pattern = r'([A-Z]{2,3})([+-]\d+\.\d+E[+-]\d+)'
+        matches = re.findall(pattern, raw_data)
+
+        TOKENS_PER_SAMPLE = 3
+        n = len(matches) // TOKENS_PER_SAMPLE
+        if n < 1:
+            self._log(f"HVTI: incomplete tokens ({len(matches)}, "
+                      f"need {TOKENS_PER_SAMPLE}/sample; "
+                      f"prefixes={set(m[0] for m in matches)})")
+            return
+
+        vals = [float(m[1]) for m in matches][: n * TOKENS_PER_SAMPLE]
+        data = np.array(vals).reshape(n, TOKENS_PER_SAMPLE)
+
+        time_raw = data[:, 0]
+        current_arr = data[:, 1]
+        voltage_arr = data[:, 2]
+
+        # Per MT spec: time_data = t + h_bias + (idx-1)*interval
+        # where t = moment of base→bias voltage switch.
+        # With h_bias=0, the first sample's timestamp IS the switch moment.
+        # Normalize so t=0 at the voltage switch.
+        t_switch = time_raw[0]
+        time_arr = time_raw - t_switch
+
+        return {
+            "raw_data": {
+                "t": time_arr,
+                "i": current_arr,
+                "v": voltage_arr,
+                "x": time_arr,
+                "y": current_arr,
+                "y2": voltage_arr,
+            },
+            "save_type": {
+                "Once_format": [
+                    {"filename": "HVTI_data.txt",
+                     "data": np.column_stack((time_arr, current_arr, voltage_arr))}
+                ],
+                "DLTS_format": [
+                    {"filename": "HVTI.transdata",
+                     "fixed_x": time_arr,
+                     "changed_y": current_arr}
+                ],
+                "Numpy_Dict_format": [
+                    {"filename": "HVTI.npy",
+                     "data": {"t": time_arr, "i": current_arr, "v": voltage_arr}}
+                ],
+            },
+            "plot_type": {
+                "xscale": "linear" if is_linear else "log",
+                "yscale": "linear",
+                "x_scaling": 1.0,
+                "y_scaling": 1e9,
+                "y2_scaling": 1.0,
+                "x_label": "Time (s)",
+                "y_label": "Current (nA)",
+                "y2_label": "Voltage (V)",
+                "ignore_points": True,
+            },
+        }
+
+
+    def measure_HVTI_post_set(self, **kwargs) -> None:
+        self._log('HVTI: Post-measurement cleanup...')
+
+
+
+
+
+# ----------------------------------------------------------------------
+# DRon_I_Bulk: 动态导通电阻测量（恒流漏极 + 衬底应力）
+# MM10 Sampling, 3-channel synchronous
+#   Ch7 (SMU4:MC) → Gate:  DV — constant Vgs
+#   Ch5 (SMU3:HC) → Drain: DI — constant Ids
+#   Ch9 (SMU6:HV) → Bulk:  MV — base:VbStress → bias:VbMeasure
+# ----------------------------------------------------------------------
+
+    def measure_DRon_I_Bulk_pre_set(self, **kwargs) -> None:
+        self._set_progress(0, 'DRon_I_Bulk')
+
+    def measure_DRon_I_Bulk_main(
+        self,
+        IfLogSampling: bool = False,
+        LogSamplingMode: int = 2,
+        Interval: float = 0.01,
+        Points: int = 1001,
+        StressTime: float = 10.0,
+        Vgs: float = 5.0,
+        IgsLimit: float = 0.1,
+        Ids: float = 0.1,
+        VdsLimit: float = 5.0,
+        VbStress: float = -100.0,
+        VbMeasure: float = 0.0,
+        IbsLimit: float = 0.008,
+    ) -> ElectricalDeviceMeasuredData:
+        """
+        Dynamic On-Resistance measurement with bulk stress,
+        using constant drain current (DI).
+
+        Measurement sequence:
+          1. Gate (DV) and Drain (DI) turn on immediately → device ON
+          2. Bulk stress applied (MV base=VbStress) during StressTime
+          3. Bulk switches to VbMeasure → high-speed sampling begins
+          4. Ron(t) = Vds(t) / Id(t)
+
+        IfLogSampling: False=linear (ML=1), True=logarithmic (ML=LogSamplingMode)
+        LogSamplingMode: 2-7 (10/25/50/100/250/500 pts/decade)
+        Interval: sampling interval in seconds (≥2 ms for log mode)
+        Points: number of sampling points
+        StressTime: base hold time (bias stress duration) in seconds
+        Vgs / IgsLimit: gate voltage and current compliance
+        Ids / VdsLimit: drain current and voltage compliance
+        VbStress: bulk base voltage (stress level)
+        VbMeasure: bulk bias voltage (measure level, typically 0 V)
+        IbsLimit: bulk current compliance
+        """
+        MLMode = 1 if not IfLogSampling else LogSamplingMode
+        is_linear = MLMode == 1
+        actual_interval = Interval if is_linear or Interval >= 0.002 else 0.002
+        mode_label = 'Linear' if is_linear else f'Log(ML{MLMode})'
+
+        self._log(f'Start DRon_I_Bulk [{mode_label}]  '
+                  f'Vgs={Vgs}V Ids={Ids}A Vb:{VbStress}->{VbMeasure}V '
+                  f'Stress={StressTime}s Interval={actual_interval}s N={Points}')
+
+        import pyvisa
+        import re
+        import numpy as np
+
+        CH_GATE = self.CH_MCSMU4       # 7 by default (SMU4:MC)
+        CH_DRAIN = self.CH_HCSMU     # 5 by default (SMU3:HC)
+        CH_BULK = self.CH_HVSMU       # 9 by default (SMU6:HV)
+
+        rm = pyvisa.ResourceManager()
+        try:
+            b1505 = rm.open_resource(self.GPIB_ADDRESS)
+            b1505.timeout = max(3600000, int((StressTime + Points * actual_interval + 30) * 1000))
+
+            # ----- close unrelated channels ---------------------------------
+            b1505.write("ERRMSK0,0")
+            for ch in (8, 3, 1, 4):
+                b1505.write(f"CL{ch}")
+
+            # ----- enable measurement channels -------------------------------
+            b1505.write(f"CNX{CH_GATE}")
+            b1505.write(f"CNX{CH_DRAIN}")
+            b1505.write(f"CNX{CH_BULK}")
+
+            # ----- series resistor OFF, filter setup ------------------------
+            for ch in (CH_GATE, CH_DRAIN, CH_BULK):
+                b1505.write(f"SSR{ch},0")
+                if ch == CH_BULK:
+                    b1505.write(f"FL1,{ch}")       # filter ON for HVSMU
+                else:
+                    b1505.write(f"FL0,{ch}")
+
+            # ----- sampling measurement configuration -----------------------
+            b1505.write("MCC")
+            b1505.write(f"ML{MLMode}")
+            b1505.write(f"MT0,{actual_interval},{Points},{StressTime}")
+            b1505.write("MSC1,2")
+
+            # ----- ADC and wait time setup ----------------------------------
+            b1505.write("WAT1,1,0")
+            b1505.write("WAT2,1,0")
+            b1505.write("AIT0,0,1")
+            b1505.write("AZ0")
+            b1505.write("AIT1,0,6")
+
+            # ----- measurement channel configuration ------------------------
+            # All channels: high-speed ADC (AAD=0), CMM=4 (I+V sync)
+            # Fixed ranging (RM=1)
+            for ch in (CH_GATE, CH_DRAIN, CH_BULK):
+                b1505.write(f"AAD{ch},0")
+                b1505.write(f"CMM{ch},4")
+                b1505.write(f"RM{ch},1")
+
+            # Gate: current measurement range for Ig
+            if IgsLimit <= 0.01:
+                b1505.write(f"RI{CH_GATE},18")
+            elif IgsLimit <= 0.1:
+                b1505.write(f"RI{CH_GATE},15")
+            else:
+                b1505.write(f"RI{CH_GATE},14")
+
+            # Drain: voltage measurement range for Vds
+            if VdsLimit <= 2.0:
+                b1505.write(f"RV{CH_DRAIN},16")
+            elif VdsLimit <= 20.0:
+                b1505.write(f"RV{CH_DRAIN},18")
+            elif VdsLimit <= 40.0:
+                b1505.write(f"RV{CH_DRAIN},19")
+            else:
+                b1505.write(f"RV{CH_DRAIN},20")
+
+            # Drain: current measurement range for Id (force side = current)
+            if Ids <= 1e-4:
+                b1505.write(f"RI{CH_DRAIN},15")
+            elif Ids <= 1e-3:
+                b1505.write(f"RI{CH_DRAIN},14")
+            elif Ids <= 1e-2:
+                b1505.write(f"RI{CH_DRAIN},13")
+            elif Ids <= 0.1:
+                b1505.write(f"RI{CH_DRAIN},12")
+            else:
+                b1505.write(f"RI{CH_DRAIN},11")
+
+            # Bulk: current measurement range for Ib
+            b1505.write(f"RI{CH_BULK},12")
+
+            # ----- measurement mode setup -----------------------------------
+            b1505.write("PAD1")
+            b1505.write(f"MM10,{CH_GATE},{CH_DRAIN},{CH_BULK}")
+            b1505.write("FMT1,0")
+            b1505.write("TSC1")
+            b1505.write("TSR")
+
+            # ----- source setup ---------------------------------------------
+            # Gate: DV — constant voltage output (starts immediately)
+            b1505.write(f"DV{CH_GATE},0,{Vgs},{IgsLimit},0,0")
+
+            # Drain: DI — constant current output (starts immediately)
+            b1505.write(f"DI{CH_DRAIN},0,{Ids},{VdsLimit},0,0")
+
+            # Bulk: TSR + MV — timer reset at bulk output start,
+            #        MV waits for XE trigger
+            b1505.write(f"TSR{CH_BULK}")
+            b1505.write(f"MV{CH_BULK},0,{VbStress},{VbMeasure},{IbsLimit}")
+
+            # ----- trigger measurement --------------------------------------
+            b1505.write("XE")
+            b1505.query("*OPC?")
+
+            raw_data = b1505.read()
+
+        except Exception as e:
+            self._log(f"DRon_I_Bulk measurement error: {e}")
+            raw_data = ""
+
+        finally:
+            self._set_progress(1.0, 'DRon_I_Bulk')
+            self._log('End DRon_I_Bulk')
+            try:
+                for ch in (CH_BULK, CH_DRAIN, CH_GATE):
+                    b1505.write(f"CNX{ch}")
+                for ch in (CH_BULK, CH_DRAIN, CH_GATE):
+                    b1505.write(f"IN{ch}")
+                b1505.write("DZ")
+            except Exception:
+                pass
+            b1505.close()
+
+        if not raw_data:
+            self._log("DRon_I_Bulk: no data received")
+            return
+
+        # ----- parse ASCII data (FMT1,0) ------------------------------------
+        pattern = r'([A-Z]{2,3})([+-]\d+\.\d+E[+-]\d+)'
+        matches = re.findall(pattern, raw_data)
+
+        # 3 channels × CMM=4 (2 values each) + TSC time stamp + status tokens
+        # Empirically: 9 tokens per sample
+        TOKENS_PER_SAMPLE = 9
+        n = len(matches) // TOKENS_PER_SAMPLE
+        if n < 1:
+            self._log(f"DRon_I_Bulk: incomplete tokens ({len(matches)}, "
+                      f"need {TOKENS_PER_SAMPLE}/sample; "
+                      f"prefixes={set(m[0] for m in matches)})")
+            return
+
+        vals = [float(m[1]) for m in matches][: n * TOKENS_PER_SAMPLE]
+        data = np.array(vals).reshape(n, TOKENS_PER_SAMPLE)
+
+        # Column mapping — B1500 FMT1 header encoding:
+        #   Status letter + Channel letter + Data type letter
+        #   Channel letters: G=ch7(gate), E=ch5(drain), I=ch9(bulk)
+        #   MM10 order (7,5,9) × CMM=4 (compliance+force) × per-ch timestamp:
+        #     0: NGT=time    1: NGI=Ig     2: NGV=Vgs
+        #     3: NET=time    4: NEV=Vds    5: NEI=Id
+        #     6: NIT=time    7: NII=Ib     8: NIV=Vb
+        time_raw = data[:, 0]
+        ig_arr = data[:, 1]
+        vgs_arr = data[:, 2]
+        vds_arr = data[:, 4]
+        id_arr = data[:, 5]
+        ib_arr = data[:, 7]
+        vb_arr = data[:, 8]
+
+        # Time normalization: t=0 at voltage switch (base→bias)
+        t_switch = time_raw[0]
+        time_arr = time_raw - t_switch
+
+        # Dynamic on-resistance
+        with np.errstate(divide='ignore', invalid='ignore'):
+            ron_arr = np.abs(vds_arr / id_arr)
+            ron_arr[~np.isfinite(ron_arr)] = np.nan
+
+        return {
+            "raw_data": {
+                "t": time_arr,
+                "Id": id_arr,
+                "Vds": vds_arr,
+                "Ig": ig_arr,
+                "Vgs": vgs_arr,
+                "Ib": ib_arr,
+                "Vb": vb_arr,
+                "Ron": ron_arr,
+                "x": time_arr,
+                "y": ron_arr,
+                "y2": id_arr,
+            },
+            "save_type": {
+                "Once_format": [
+                    {"filename": "DRon_I_Bulk_data.txt",
+                     "data": np.column_stack((time_arr, id_arr, vds_arr,
+                                              ig_arr, vgs_arr, ib_arr, vb_arr,
+                                              ron_arr))}
+                ],
+                "DLTS_format": [
+                    {"filename": "DRon_I_Bulk.transdata",
+                     "fixed_x": time_arr,
+                     "changed_y": ron_arr},
+                    {"filename": "DRon_I_Bulk_Ib.transdata",
+                     "fixed_x": time_arr,
+                     "changed_y": ib_arr},
+                    {"filename": "DRon_I_Bulk_Ig.transdata",
+                     "fixed_x": time_arr,
+                     "changed_y": ig_arr}
+                ],
+                "Numpy_Dict_format": [
+                    {"filename": "DRon_I_Bulk.npy",
+                     "data": {
+                         "t": time_arr,
+                         "Id": id_arr,
+                         "Vds": vds_arr,
+                         "Ig": ig_arr,
+                         "Vgs": vgs_arr,
+                         "Ib": ib_arr,
+                         "Vb": vb_arr,
+                         "Ron": ron_arr,
+                     }}
+                ],
+            },
+            "plot_type": {
+                "xscale": "linear" if is_linear else "log",
+                "yscale": "linear",
+                "x_scaling": 1.0,
+                "y_scaling": 1e3,
+                "y2_scaling": 1e3,
+                "x_label": "Time (s)",
+                "y_label": "Ron (mOhm)",
+                "y2_label": "Id (mA)",
+                "ignore_points": True,
+            },
+        }
+
+    def measure_DRon_I_Bulk_post_set(self, **kwargs) -> None:
+        self._log('DRon_I_Bulk: Post-measurement cleanup...')
+
+
+
+    # ----------------------------------------------------------------------
+    # SHVCV: Stress High Voltage CV ????
+    # MM18 CV (DC bias) sweep measurement
+    #   Ch9 (HVSMU) ? Drain-Source DC bias via High Voltage Bias Tee
+    #   Ch4 (CMU)   ? Capacitance measurement via High Voltage Bias Tee
+    #
+    # Stress: DV StressVoltage ? sleep(StressTime) ? DV VdStart ? sweep.
+    # Sweep: WDCV {VdStart?VdStop} ? WTDCV hold=0 ? MM18 ? XE.
+    # ----------------------------------------------------------------------
+
+    def measure_SHVCV_pre_set(self, **kwargs) -> None:
+        self._set_progress(0, 'SHVCV')
+
+    def measure_SHVCV_main(
+        self,
+        IntegTime: str = "MEDIUM",
+        StressVoltage: float = 50.0,
+        StressTime: float = 10.0,
+        Frequency: float = 100e3,
+        OscLevel: float = 0.1,
+        VdStart: float = 0.0,
+        VdStop: float = 50.0,
+        VdLinearStep: float = 1.0,
+        IdLimit: float = 0.008,
+    ) -> ElectricalDeviceMeasuredData:
+        """
+        Stress High Voltage CV measurement for GaN Cds characterization.
+
+        Stress: DV applies StressVoltage, held via time.sleep(StressTime),
+        then transitions to VdStart before sweep begins.
+
+        IntegTime: "SHORT" | "MEDIUM" | "LONG" ? MFCMU integration time
+                   SHORT:  ACT 0,1  (minimal averaging)
+                   MEDIUM: ACT 0,3  (moderate averaging)
+                   LONG:   ACT 0,5  (heavy averaging)
+        StressVoltage: Vds stress voltage (V), can differ from VdStart
+        StressTime: stress duration (s), via time.sleep
+        Frequency: CMU measurement frequency (Hz)
+        OscLevel: CMU AC oscillation level (V), 0 to 0.25
+        VdStart: CV sweep start voltage (V)
+        VdStop: CV sweep end voltage (V)
+        VdLinearStep: voltage step size (V), negative for downward sweep
+        IdLimit: HVSMU current compliance (A), 1e-6 to 8e-3
+        """
+        integ_map = {"SHORT": (0, 1), "MEDIUM": (0, 3), "LONG": (0, 5)}
+        act_mode, act_n = integ_map.get(IntegTime, (0, 3))
+
+        sweep_steps = int(abs(VdStop - VdStart) / abs(VdLinearStep)) + 1
+        if sweep_steps < 1 or sweep_steps > 1001:
+            self._log(f"SHVCV: invalid sweep_steps={sweep_steps}, clamping to [1,1001]")
+            sweep_steps = max(1, min(sweep_steps, 1001))
+
+        if IdLimit < 1e-6 or IdLimit > 8e-3:
+            self._log(f"SHVCV: IdLimit={IdLimit} out of range [1e-6, 8e-3]; using 8e-3")
+            IdLimit = 8e-3
+
+        self._log(f'Start SHVCV [{IntegTime}]  '
+                  f'Stress={StressVoltage}V/{StressTime}s  '
+                  f'Freq={Frequency}Hz Osc={OscLevel}V  '
+                  f'Sweep: {VdStart}?{VdStop}V step={VdLinearStep}V ({sweep_steps}pts)  '
+                  f'IdLimit={IdLimit}A ACT={act_mode},{act_n}')
+
+        import pyvisa
+        import re
+        import numpy as np
+        import time
+
+        CH_CMU   = self.CH_CMU
+        CH_HVSMU = self.CH_HVSMU
+
+        rm = pyvisa.ResourceManager()
+        try:
+            b1505 = rm.open_resource(self.GPIB_ADDRESS)
+            b1505.timeout = max(3600000, int((StressTime + sweep_steps * 0.5 + 120) * 1000))
+
+            b1505.write(f"CN {CH_CMU},{CH_HVSMU}")
+
+            b1505.write(f"SSR {CH_HVSMU},0")
+            b1505.write(f"FL 1,{CH_HVSMU}")
+
+            b1505.write(f"DV {CH_HVSMU},0,{StressVoltage},{IdLimit}")
+
+            self._log(f"SHVCV: Stress {StressVoltage}V for {StressTime}s (DV + sleep)")
+            time.sleep(StressTime)
+
+            b1505.write(f"DV {CH_HVSMU},0,{VdStart},{IdLimit}")
+            self._log(f"SHVCV: Transition to sweep start {VdStart}V")
+
+            b1505.write(f"ACT {act_mode},{act_n}")
+            b1505.write("IMP 100")
+            b1505.write(f"RC {CH_CMU},0")
+            b1505.write(f"FC {CH_CMU},{Frequency}")
+            b1505.write(f"ACV {CH_CMU},{OscLevel}")
+
+            b1505.write(f"WDCV {CH_HVSMU},1,{VdStart},{VdStop},{sweep_steps},{IdLimit}")
+            b1505.write("WMDCV 1")
+
+            b1505.write("WTDCV 0,0.001")
+
+            b1505.write("FMT 1,1")
+            b1505.write("TSC 1")
+            b1505.write(f"MM 18,{CH_CMU},{CH_HVSMU}")
+
+            b1505.write("XE")
+            b1505.query("*OPC?")
+
+            raw_data = b1505.read()
+
+        except Exception as e:
+            self._log(f"SHVCV measurement error: {e}")
+            raw_data = ""
+
+        finally:
+            self._set_progress(1.0, 'SHVCV')
+            self._log('End SHVCV')
+            try:
+                b1505.write("DZ")
+            except Exception:
+                pass
+            b1505.close()
+
+        if not raw_data:
+            self._log("SHVCV: no data received")
+            return
+
+        pattern = r'([A-Z]{3})([+-]\d+\.\d+E[+-]\d+)'
+        matches = re.findall(pattern, raw_data)
+
+        # MM18 per-point token structure (CMU ch4 + HVSMU ch9):
+        #   NDT=CMU_time  NDC=capacitance  NDY=conductance
+        #   NIT=HV_time   NII=HV_current   NIV=measured_Vds  WIV=setpoint_Vds
+        TOKENS_PER_POINT = 7
+        n_points = len(matches) // TOKENS_PER_POINT
+
+        if n_points < 1:
+            self._log(f"SHVCV: incomplete tokens ({len(matches)}, "
+                      f"need {TOKENS_PER_POINT}/point; "
+                      f"prefixes={set(m[0] for m in matches)})")
+            return
+
+        c_arr = []
+        v_arr = []
+        for i in range(n_points):
+            point_tokens = matches[i * TOKENS_PER_POINT : (i + 1) * TOKENS_PER_POINT]
+            for prefix, val_str in point_tokens:
+                val = float(val_str)
+                if prefix == 'NDC':
+                    c_arr.append(val)
+                elif prefix == 'NIV':
+                    v_arr.append(val)
+
+        c_arr = np.array(c_arr)
+        v_arr = np.array(v_arr)
+        min_len = min(len(v_arr), len(c_arr))
+        v_arr = v_arr[:min_len]
+        c_arr = c_arr[:min_len]
+
+        if min_len < 1:
+            self._log("SHVCV: no valid C-V pairs extracted")
+            return
+
+        v_ds = np.abs(v_arr)
+        c_ds = np.abs(c_arr)
+
+        return {
+            "raw_data": {
+                "v": v_ds,
+                "c": c_ds,
+                "x": v_ds,
+                "y": c_ds,
+                "y2": c_ds,
+            },
+            "save_type": {
+                "Once_format": [
+                    {"filename": "SHVCV_data.txt",
+                     "data": np.column_stack((v_ds, c_ds))}
+                ],
+                "DLTS_format": [
+                    {"filename": "SHVCV.transdata",
+                     "fixed_x": v_ds,
+                     "changed_y": c_ds}
+                ],
+                "Numpy_Dict_format": [
+                    {"filename": "SHVCV.npy",
+                     "data": {"Vds": v_ds, "Cds": c_ds}}
+                ],
+            },
+            "plot_type": {
+                "xscale": "linear",
+                "yscale": "linear",
+                "x_scaling": 1.0,
+                "y_scaling": 1e12,
+                "y2_scaling": 1e12,
+                "x_label": "Vds (V)",
+                "y_label": "Cds (pF)",
+                "y2_label": "Cds (pF)",
+                "ignore_points": False,
+            },
+        }
+
+    def measure_SHVCV_post_set(self, **kwargs) -> None:
+        self._log('SHVCV: Post-measurement cleanup...')
+
+
+    
+
+    
+    # ----------------------------------------------------------------------
+    # HVCV 测量方法
+    # ----------------------------------------------------------------------
+    
+    def measure_HVCV_pre_set(self, **kwargs) -> None:
+        """
+        测量前准备工作：确认当前workspace，打开Preset空间，并加载指定的 Test setup
+        """
+        self._set_progress(0, 'HVCV')
+        self._goto_workspace()
+        self._goto_preset_group()
+        
+        self._current_app_name = 'HVCV'
+        
+        # 选择预设的 Test
+        self.b1505a.write(f':PRES:SET:SEL "{self._current_app_name}"')
+        self._check_instrument_errors("Select Preset Test")
+
+        # SHORT | MEDIUM | LONG
+        IntegTime = kwargs['IntegTime']
+        Frequency = kwargs['Frequency']
+        OscLevel = kwargs['OscLevel']
+        Scale = kwargs['Scale']
+        Drain = kwargs['Drain']
+        VdBias = kwargs['VdBias']
+        VdStart = kwargs['VdStart']
+        VdStop = kwargs['VdStop']
+        VdLinearStep = kwargs['VdLinearStep']
+        IdLimit = kwargs['IdLimit']
+
+        
+        self.b1505a.write(f':STR "IntegTime", "{IntegTime}"')
+        self.b1505a.write(f':NUMB "Frequency", {Frequency}')
+        self.b1505a.write(f':NUMB "OscLevel", {OscLevel}')
+        
+        self.b1505a.write(f':STR "Scale", "{Scale}"')
+        self.b1505a.write(f':STR "Drain", "{Drain}"')
+        self.b1505a.write(f':STR "VdBias", "{VdBias}"')
+        self.b1505a.write(f':NUMB "VdStart", {VdStart}')
+        self.b1505a.write(f':NUMB "VdStop", {VdStop}')
+        self.b1505a.write(f':NUMB "VdLinearStep", {VdLinearStep}')
+        self.b1505a.write(f':NUMB "IdLimit", {IdLimit}')
+
+
+        self._check_instrument_errors("Set Parameters")
+        time.sleep(0.5)
+        
+
+    def measure_HVCV_main(
+        self, IntegTime: str = 'SHORT', Frequency: int = 100e3, OscLevel: float = 0.1, Scale: str = 'LINEAR',
+        Drain: str = 'CMU1:MF', VdBias: str = 'SMU6:HV', VdStart: float = 0, VdStop: float = 30, VdLinearStep: float = 2.0,
+        IdLimit: float = 8e-3
+    ) -> ElectricalDeviceMeasuredData:
+        """
+        执行 HVCV 测量并解析数据
+        """
+        self._log('Start HVCV Measure')
+
+        while True:
+            # 启动单次测量[cite: 1]
+            self.b1505a.write(':BENC:SEL:RUN')
+            time.sleep(2)
+            # 等待测量完成。使用 *OPC? 阻塞直到所有待处理操作完成[cite: 1]
+            if self._wait_for_cmd_compelete():
+                break
+            else:
+                self._log(f'OPC timeout, restart measurement', l='warning')
+                self.b1505a.write(':BENC:SEL:ABOR')
+                time.sleep(10)
+                continue
+
+        # 设置数据获取格式：返回 TEXT 格式，且换行符编码设为 ON (\r\n)[cite: 1]
+        self.b1505a.write(':RES:FORM TEXT')
+        self.b1505a.write(':RES:FORM:ESC ON')
+        
+        # 请求最新测量结果[cite: 1]
+        self.b1505a.write(':RES:FET?')
+        
+        # 读取原始字节流以解析 IEEE 明确长度的块数据 (Definite Length Arbitrary Block Data)[cite: 3]
+        raw_data = self.b1505a.read_raw()
+        
+        header_str = raw_data[0:2].decode('ascii')
+        if header_str.startswith('#'):
+            num_digits = int(header_str[1])
+            data_length = int(raw_data[2:2+num_digits].decode('ascii'))
+            data_str = raw_data[2+num_digits : 2+num_digits+data_length].decode('ascii')
+        else:
+            # 如果格式异常，回退处理
+            data_str = raw_data.decode('ascii')
+
+        self._set_progress(1.0, 'HVCV')
+        self._log('End HVCV Measure')
+
+        # ---------------------------------------------------------
+        # 解析返回的 EasyEXPERT 数据
+        # EasyEXPERT TEXT 格式通常包含多行 MetaData (Headers) 以及纯数据列。
+        # 以下是通用的 Numpy 解析方法。你需要根据你实际输出的 CSV 结构微调。
+        # 假设返回数据中包含 Time, Vds, Ids 并且能计算 Ron。
+        # ---------------------------------------------------------
+        try:
+            # 跳过非数值头部行，直接读取矩阵 (如有表头视情况调整 skip_header 参数)
+            _, parsed_array = self.parse_b1505a_text(data_str, header_marker="Vdrain,Cds,Ids,Ta", row_delimiter="\\r\\n")
+            Vds = parsed_array[:, 0]
+            Cds = parsed_array[:, 1]
+            Ids = parsed_array[:, 2]
+            
+        except Exception as e:
+            self._log(f'Data parsing error: {e}. Generating dummy data for fallback.', l='warning')
+
+        return {
+            "raw_data": {"v": Vds, "c": Cds, "i":Ids, "x": Vds, "y": Cds, "y2": Ids},
+            "save_type": {
+                "Once_format": [
+                    {"filename": "HVCV_data.txt", "data": np.column_stack((Vds, Cds, Ids))}
+                ],
+                "DLTS_format": [
+                    {"filename": "HVCV.transdata", "fixed_x": Vds, "changed_y": Cds}
+                ],
+                "Numpy_Dict_format": [
+                    {"filename": "HVCV.npy", "data": {"Vds": Vds, "Cds": Cds, "Ids":Ids}}
+                ]
+            },
+            "plot_type": {
+                "xscale": "linear",
+                "yscale": "linear",
+                "x_scaling": 1.0,
+                "y_scaling": 1e12,
+                "y2_scaling": 1.0,
+                "x_label": "Voltage (V)",
+                "y_label": "Capacitance (pF)",
+                "y2_label": "Current (A)",
+                "ignore_points": False
+            }
+        }
+
+    def measure_HVCV_post_set(self, **kwargs) -> None:
+        """
+        测量后执行的清理步骤
+        """
+        #self._log('DRon_I: Post-measurement cleanup...')
+        # 如果需要关闭工作空间，可以取消注释下面代码
+        # self.b1505a.write(':WORK:CLOS')
+        # self.b1505a.query('*OPC?')[cite: 1]
+
+
+    
+
 
 
 
@@ -391,9 +1212,9 @@ class B1505A:
                 "x_scaling": 1.0,
                 "y_scaling": 1.0,
                 "y2_scaling": 1.0,
-                "xlabel": "Voltage (V)",
-                "ylabel": "Current (A)",
-                "y2label": "Current (A)",
+                "x_label": "Voltage (V)",
+                "y_label": "Current (A)",
+                "y2_label": "Current (A)",
                 "ignore_points": False
             }
         }
@@ -524,26 +1345,28 @@ class B1505A:
             i = parsed_array[:, 3]
             r = parsed_array[:, 1]
             v = parsed_array[:, 2]
+            ig = parsed_array[:, 5]
             data_mask = t>=0
             t = t[data_mask]
             i = i[data_mask]
             r = r[data_mask]
             v = v[data_mask]
+            ig = ig[data_mask]
         except Exception as e:
             self._log(f'Data parsing error: {e}. Generating dummy data for fallback.', l='warning')
 
         return {
-            "raw_data": {"t": t, "i": i, "r": r, "v": v, "x": t, "y": r, "y2": v},
+            "raw_data": {"t": t, "i": i, "r": r, "v": v, "ig":ig, "x": t, "y": r, "y2": ig},
             "save_type": {
                 "Once_format": [
-                    {"filename": "DRon_I_data.txt", "data": np.column_stack((t, r, v, i))}
+                    {"filename": "DRon_I_data.txt", "data": np.column_stack((t, r, v, i, ig))}
                 ],
                 "DLTS_format": [
                     {"filename": "DRon_I_tr.transdata", "fixed_x": t, "changed_y": r},
-                    {"filename": "DRon_I_tv.transdata", "fixed_x": t, "changed_y": v}
+                    {"filename": "DRon_I_tig.transdata", "fixed_x": t, "changed_y": ig}
                 ],
                 "Numpy_Dict_format": [
-                    {"filename": "DRon_I.npy", "data": {"t": t, "i": i, "r": r, "v": v}}
+                    {"filename": "DRon_I.npy", "data": {"t": t, "i": i, "r": r, "v": v, "ig":ig}}
                 ]
             },
             "plot_type": {
@@ -552,9 +1375,9 @@ class B1505A:
                 "x_scaling": 1.0,
                 "y_scaling": 1e3,
                 "y2_scaling": 1.0,
-                "xlabel": "Time (s)",
-                "ylabel": "Resistance (mOhm)",
-                "y2label": "Voltage (V)",
+                "x_label": "Time (s)",
+                "y_label": "Resistance (mOhm)",
+                "y2_label": "Current (A)",
                 "ignore_points": True
             }
         }
@@ -715,9 +1538,9 @@ class B1505A:
                 "x_scaling": 1.0,
                 "y_scaling": 1e3,
                 "y2_scaling": 1e3,
-                "xlabel": "Voltage (V)",
-                "ylabel": "Current (mA)",
-                "y2label": "Current (mA)",
+                "x_label": "Voltage (V)",
+                "y_label": "Current (mA)",
+                "y2_label": "Current (mA)",
                 "ignore_points": False
             }
         }
@@ -864,9 +1687,9 @@ class B1505A:
                 "x_scaling": 1.0,
                 "y_scaling": 1.0,
                 "y2_scaling": 1.0,
-                "xlabel": "Voltage (V)",
-                "ylabel": "Current (A)",
-                "y2label": "Current (A)",
+                "x_label": "Voltage (V)",
+                "y_label": "Current (A)",
+                "y2_label": "Current (A)",
                 "ignore_points": False
             }
         }
@@ -1012,9 +1835,9 @@ class B1505A:
                 "x_scaling": 1.0,
                 "y_scaling": 1.0,
                 "y2_scaling": 1.0,
-                "xlabel": "Voltage (V)",
-                "ylabel": "Current (A)",
-                "y2label": "Current (A)",
+                "x_label": "Voltage (V)",
+                "y_label": "Current (A)",
+                "y2_label": "Current (A)",
                 "ignore_points": False
             }
         }
@@ -1129,9 +1952,9 @@ class B1505A:
                 "x_scaling": 1.0,
                 "y_scaling": 1.0,
                 "y2_scaling": 1.0,
-                "xlabel": "Voltage (V)",
-                "ylabel": "Current (A)",
-                "y2label": "Current (A)",
+                "x_label": "Voltage (V)",
+                "y_label": "Current (A)",
+                "y2_label": "Current (A)",
                 "ignore_points": False
             }
         }
@@ -1296,9 +2119,9 @@ class B1505A:
                 "x_scaling": 1.0,
                 "y_scaling": 1e3,
                 "y2_scaling": 1.0,
-                "xlabel": "Time (s)",
-                "ylabel": "Resistance (mOhm)",
-                "y2label": "Voltage (V)",
+                "x_label": "Time (s)",
+                "y_label": "Resistance (mOhm)",
+                "y2_label": "Voltage (V)",
                 "ignore_points": True
             }
         }
